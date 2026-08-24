@@ -47,16 +47,49 @@ class UserFact(Base):
 
 
 class Event(Base):
-    """Append-only episodic log (architecture §6.2): ingests, agent runs, user reactions."""
+    """Append-only episodic log (architecture §6.2): ingests, agent runs, user reactions.
+
+    `domain` mirrors the fact entitlement model: context slices only include events
+    whose domain is in the agent's scope. NULL = cross-domain/system telemetry,
+    visible to every agent.
+    """
 
     __tablename__ = "events"
-    __table_args__ = (Index("ix_events_user_time", "user_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_events_user_time", "user_id", "created_at"),
+        Index("ix_events_user_domain", "user_id", "domain"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     user_id: Mapped[str] = mapped_column(String(64), nullable=False)
     type: Mapped[str] = mapped_column(String(64), nullable=False)  # e.g. agent_run, fact_superseded, insight_dismissed, llm_call
     agent: Mapped[str | None] = mapped_column(String(32))
+    domain: Mapped[str | None] = mapped_column(String(32))  # NULL = system/cross-domain
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class NutritionMeal(Base):
+    """Domain twin (architecture §6.2): the nutrition vertical's raw records.
+
+    Twins hold data; `user_facts` holds beliefs. A meal is a record, so it lives
+    here — never as a fact (write_fact enforces this).
+    """
+
+    __tablename__ = "nutrition_meals"
+    __table_args__ = (Index("ix_meals_user_time", "user_id", "logged_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    logged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)  # photo | text
+    photo_id: Mapped[str | None] = mapped_column(String(80))  # file in media storage
+    description: Mapped[str] = mapped_column(Text, default="")
+    kcal: Mapped[int | None] = mapped_column()
+    protein_g: Mapped[float | None] = mapped_column(Float)
+    carbs_g: Mapped[float | None] = mapped_column(Float)
+    fat_g: Mapped[float | None] = mapped_column(Float)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)  # 0 until estimated
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

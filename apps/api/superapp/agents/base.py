@@ -1,15 +1,20 @@
-"""Agent runtime (architecture §5). Every agent is a stateless function:
+"""Agent runtime (architecture §5), two tiers:
 
-    (trigger, context_slice) -> (ui_blocks, fact_writes, event_writes, actions)
+- think(): background cognition. May call the LLM, may take time, and returns
+  durable write-backs (facts/events) that the harness applies. Triggered by
+  cron, webhooks, ingests, or an explicit pull-to-refresh — never by a plain
+  screen view.
+- render(): request-path projection. A pure function of the context slice that
+  returns a Screen. No DB writes, no LLM calls, no side effects — which is why
+  GET /v1/screen/* is fast and idempotent.
 
-`run_agent` is the deterministic harness around that function: assemble context
-via the Context API, call the agent, apply write-backs (how memory forms), and
-log the run to `events`.
+Memory forms only through think()'s write-backs; between runs agents forget
+everything. Conclusions live in the substrate; screens just read them.
 """
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable, Protocol
+from typing import Protocol
 
 from sqlalchemy.orm import Session
 
@@ -30,41 +35,63 @@ class FactWrite:
 class EventWrite:
     type: str
     payload: dict = field(default_factory=dict)
+    domain: str | None = None
 
 
 @dataclass
-class AgentResult:
-    screen: Screen | None = None
+class ThinkResult:
     fact_writes: list[FactWrite] = field(default_factory=list)
     event_writes: list[EventWrite] = field(default_factory=list)
     actions_taken: list[str] = field(default_factory=list)
 
 
-class AgentFn(Protocol):
-    def __call__(self, db: Session, *, trigger: dict, context: ContextSlice, run_id: str) -> AgentResult: ...
+class RenderFn(Protocol):
+    def __call__(self, context: ContextSlice) -> Screen: ...
 
 
-_REGISTRY: dict[str, "Callable"] = {}
+class ThinkFn(Protocol):
+    def __call__(self, db: Session, *, trigger: dict, context: ContextSlice, run_id: str) -> ThinkResult: ...
 
 
-def register_agent(name: str):
-    def deco(fn: AgentFn) -> AgentFn:
-        _REGISTRY[name] = fn
-        return fn
+@dataclass
+class AgentSpec:
+    name: str
+    render: RenderFn
+    think: ThinkFn | None = None  # None = purely reactive agent, renders substrate state
 
-    return deco
+
+_REGISTRY: dict[str, AgentSpec] = {}
 
 
-def run_agent(db: Session, *, agent: str, user_id: str, trigger: dict) -> AgentResult:
-    if agent not in _REGISTRY:
-        raise ValueError(f"No agent registered under {agent!r}")
+def register_agent(name: str, *, render: RenderFn, think: ThinkFn | None = None) -> None:
+    _REGISTRY[name] = AgentSpec(name=name, render=render, think=think)
+
+
+def get_agent(name: str) -> AgentSpec:
+    if name not in _REGISTRY:
+        raise ValueError(f"No agent registered under {name!r}")
+    return _REGISTRY[name]
+
+
+def render_screen(db: Session, *, agent: str, user_id: str) -> Screen:
+    """Request path: assemble a context slice, project it to a Screen. Pure —
+    performs no writes; callers that want telemetry log it themselves."""
+    spec = get_agent(agent)
+    context = get_context(db, agent=agent, user_id=user_id)
+    return spec.render(context)
+
+
+def run_think(db: Session, *, agent: str, user_id: str, trigger: dict) -> dict:
+    """Background path: run cognition, then apply write-backs — how memory forms.
+    Returns a run summary for the caller (cron endpoint, refresh handler)."""
+    spec = get_agent(agent)
+    if spec.think is None:
+        raise ValueError(f"Agent {agent!r} has no think step")
     run_id = str(uuid.uuid4())
 
     context = get_context(db, agent=agent, user_id=user_id)
-    result = _REGISTRY[agent](db, trigger=trigger, context=context, run_id=run_id)
+    result = spec.think(db, trigger=trigger, context=context, run_id=run_id)
 
-    # Write-back step: anything durable the agent learned becomes a fact/event
-    # before the run ends. Between runs the agent forgets everything.
     for fw in result.fact_writes:
         write_fact(
             db,
@@ -78,7 +105,7 @@ def run_agent(db: Session, *, agent: str, user_id: str, trigger: dict) -> AgentR
             expires_at=fw.expires_at,
         )
     for ew in result.event_writes:
-        append_event(db, user_id=user_id, type=ew.type, agent=agent, payload=ew.payload)
+        append_event(db, user_id=user_id, type=ew.type, agent=agent, domain=ew.domain, payload=ew.payload)
 
     append_event(
         db,
@@ -92,4 +119,10 @@ def run_agent(db: Session, *, agent: str, user_id: str, trigger: dict) -> AgentR
         },
     )
     db.commit()
-    return result
+    return {
+        "run_id": run_id,
+        "agent": agent,
+        "facts_written": len(result.fact_writes),
+        "events_written": len(result.event_writes),
+        "actions_taken": result.actions_taken,
+    }

@@ -14,5 +14,10 @@ dist/
 .env
 *.pem
 
-# OS
+# Local data (meal photos, DB dumps)
+media/
+backups/
+
+# IDE / OS
+.idea/
 .DS_Store

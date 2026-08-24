@@ -397,6 +397,11 @@
       "title": "Type",
       "type": "string"
     },
+    "version": {
+      "default": 1,
+      "title": "Version",
+      "type": "integer"
+    },
     "title": {
       "title": "Title",
       "type": "string"

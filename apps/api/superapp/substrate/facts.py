@@ -4,6 +4,7 @@
   the old value is archived to `events` (type=fact_superseded), never deleted.
 - Decay: reads exclude expired facts; expires_at is set by writers where relevant.
 """
+import json
 from datetime import datetime, timezone
 
 from sqlalchemy import or_, select
@@ -11,6 +12,28 @@ from sqlalchemy.orm import Session
 
 from ..models import UserFact, utcnow
 from .events import append_event
+
+# Facts are *beliefs* — small, singleton, per-(user, domain, key). Collections
+# (transactions, meals, wardrobe items) belong in domain twin tables, and this
+# guard makes stuffing them into user_facts impossible rather than discouraged.
+MAX_FACT_VALUE_BYTES = 1024
+
+
+def _validate_fact_value(value: dict) -> None:
+    if not isinstance(value, dict):
+        raise ValueError("fact value must be a JSON object")
+    for k, v in value.items():
+        if isinstance(v, (list, tuple, set)):
+            raise ValueError(
+                f"fact value field {k!r} is a collection; collections belong in a "
+                "domain twin table, not user_facts"
+            )
+    size = len(json.dumps(value, default=str))
+    if size > MAX_FACT_VALUE_BYTES:
+        raise ValueError(
+            f"fact value is {size} bytes (max {MAX_FACT_VALUE_BYTES}); large payloads "
+            "belong in a domain twin table, not user_facts"
+        )
 
 
 def write_fact(
@@ -25,6 +48,7 @@ def write_fact(
     source_run_id: str | None = None,
     expires_at: datetime | None = None,
 ) -> UserFact:
+    _validate_fact_value(value)
     existing = db.scalar(
         select(UserFact).where(
             UserFact.user_id == user_id, UserFact.domain == domain, UserFact.key == key
@@ -51,6 +75,7 @@ def write_fact(
         user_id=user_id,
         type="fact_superseded",
         agent=source_agent,
+        domain=domain,
         payload={
             "domain": domain,
             "key": key,

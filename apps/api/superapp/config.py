@@ -17,13 +17,20 @@ class Settings(BaseSettings):
     # LLM provider. When no key is set the provider runs in deterministic stub mode
     # so the spine works fully offline.
     anthropic_api_key: str = ""
-    # Model-per-task routing (architecture §5: big model for drafting, small for routing).
-    model_default: str = "claude-sonnet-4-5"
+    # Model-per-task routing (architecture §5: big model for cognition, small for routing).
+    # Downgrade a task only when cost events + the golden set prove it doesn't hurt.
+    model_default: str = "claude-opus-5"
     model_routing: str = "claude-haiku-4-5"
+    # How long complete_batch() waits for the Batches API (cron jobs tolerate this).
+    llm_batch_max_wait_seconds: int = 3600
+    llm_batch_poll_seconds: int = 10
 
     # Context assembly budgets (architecture §6.2: retrieval, not accumulation).
     context_max_facts: int = 50
     context_max_events: int = 20
+
+    # Meal photo storage. Local disk for dev; swap for R2/S3 by replacing storage.py.
+    media_dir: str = "./media"
 
 
 @lru_cache

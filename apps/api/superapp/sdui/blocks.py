@@ -86,6 +86,10 @@ class Screen(BaseModel):
     """Top-level payload for any screen the client renders."""
 
     type: Literal["screen"] = "screen"
+    # Contract version, bumped on breaking changes only. Clients compare against
+    # their supported version and prompt for an app update when behind; unknown
+    # blocks within a version degrade silently.
+    version: int = 1
     title: str
     sections: list[Section]
 

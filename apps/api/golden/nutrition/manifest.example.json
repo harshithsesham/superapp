@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy to manifest.json and drop ~10 real meal photos in this directory. Ranges are [min, max] pass bands — kcal within ±15% of your own estimate is a good starting band.",
+  "cases": [
+    {
+      "photo": "IMG_0001.jpg",
+      "label": "chicken burrito bowl",
+      "expect": { "kcal": [550, 850], "protein_g": [30, 55] }
+    },
+    {
+      "photo": "IMG_0002.jpg",
+      "label": "2 eggs and toast",
+      "expect": { "kcal": [280, 420], "protein_g": [14, 24] }
+    }
+  ]
+}

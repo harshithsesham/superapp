@@ -7,29 +7,44 @@ import type { LeafBlock, Screen, Section } from "./types";
 
 type ReactionFn = (kind: string, targetId: string, agent?: string) => void;
 
-export function SduiScreen({ screen, onReaction }: { screen: Screen; onReaction: ReactionFn }) {
+// Media served by the API is auth-gated and returned as relative URLs.
+type MediaCtx = { baseUrl: string; headers?: Record<string, string> };
+
+type RenderCtx = { onReaction: ReactionFn; media?: MediaCtx };
+
+export function SduiScreen({
+  screen,
+  onReaction,
+  media,
+}: {
+  screen: Screen;
+  onReaction: ReactionFn;
+  media?: MediaCtx;
+}) {
+  const ctx: RenderCtx = { onReaction, media };
   return (
     <View>
       <Text style={s.screenTitle}>{screen.title}</Text>
       {screen.sections.map((section, i) => (
-        <SduiSection key={i} section={section} onReaction={onReaction} />
+        <SduiSection key={i} section={section} ctx={ctx} />
       ))}
     </View>
   );
 }
 
-function SduiSection({ section, onReaction }: { section: Section; onReaction: ReactionFn }) {
+function SduiSection({ section, ctx }: { section: Section; ctx: RenderCtx }) {
   return (
     <View style={s.section}>
       {section.title ? <Text style={s.sectionTitle}>{section.title}</Text> : null}
       {section.blocks.map((block, i) => (
-        <Block key={i} block={block} onReaction={onReaction} />
+        <Block key={i} block={block} ctx={ctx} />
       ))}
     </View>
   );
 }
 
-function Block({ block, onReaction }: { block: LeafBlock; onReaction: ReactionFn }) {
+function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
+  const { onReaction, media } = ctx;
   switch (block.type) {
     case "text": {
       const style =
@@ -91,14 +106,18 @@ function Block({ block, onReaction }: { block: LeafBlock; onReaction: ReactionFn
         </View>
       );
 
-    case "image_card":
+    case "image_card": {
+      const uri = block.image_url.startsWith("/")
+        ? `${media?.baseUrl ?? ""}${block.image_url}`
+        : block.image_url;
       return (
         <View style={s.imageCard}>
-          <Image source={{ uri: block.image_url }} style={s.image} resizeMode="cover" />
+          <Image source={{ uri, headers: media?.headers }} style={s.image} resizeMode="cover" />
           {block.title ? <Text style={s.cardTitle}>{block.title}</Text> : null}
           {block.subtitle ? <Text style={s.caption}>{block.subtitle}</Text> : null}
         </View>
       );
+    }
 
     case "list":
       return (

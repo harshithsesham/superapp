@@ -4,9 +4,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from . import models  # noqa: F401 — register tables
-from .agents import demo  # noqa: F401 — register agents
+from .agents import nutrition  # noqa: F401 — register agents
 from .db import Base, engine
-from .routers import screen
+from .routers import nutrition as nutrition_router, screen
 
 
 @asynccontextmanager
@@ -18,6 +18,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Super App API", version="0.1.0", lifespan=lifespan)
 app.include_router(screen.router)
+app.include_router(nutrition_router.router)
 
 
 @app.get("/health")
