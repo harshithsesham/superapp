@@ -1,0 +1,418 @@
+{
+  "$defs": {
+    "Action": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "style": {
+          "default": "primary",
+          "enum": [
+            "primary",
+            "secondary",
+            "destructive"
+          ],
+          "title": "Style",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ],
+      "title": "Action",
+      "type": "object"
+    },
+    "ActionRow": {
+      "properties": {
+        "type": {
+          "const": "action_row",
+          "default": "action_row",
+          "title": "Type",
+          "type": "string"
+        },
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/Action"
+          },
+          "maxItems": 3,
+          "minItems": 1,
+          "title": "Actions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "actions"
+      ],
+      "title": "ActionRow",
+      "type": "object"
+    },
+    "ImageCard": {
+      "properties": {
+        "type": {
+          "const": "image_card",
+          "default": "image_card",
+          "title": "Type",
+          "type": "string"
+        },
+        "image_url": {
+          "title": "Image Url",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "subtitle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subtitle"
+        }
+      },
+      "required": [
+        "image_url"
+      ],
+      "title": "ImageCard",
+      "type": "object"
+    },
+    "InsightCard": {
+      "description": "The workhorse: one insight from one agent, dismissible, optionally actionable.",
+      "properties": {
+        "type": {
+          "const": "insight_card",
+          "default": "insight_card",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "agent": {
+          "title": "Agent",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "emphasis": {
+          "default": "default",
+          "enum": [
+            "default",
+            "positive",
+            "warning"
+          ],
+          "title": "Emphasis",
+          "type": "string"
+        },
+        "action_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action Label"
+        },
+        "action_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action Id"
+        }
+      },
+      "required": [
+        "id",
+        "agent",
+        "title",
+        "body"
+      ],
+      "title": "InsightCard",
+      "type": "object"
+    },
+    "ListBlock": {
+      "properties": {
+        "type": {
+          "const": "list",
+          "default": "list",
+          "title": "Type",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ListItem"
+          },
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "ListBlock",
+      "type": "object"
+    },
+    "ListItem": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "subtitle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subtitle"
+        },
+        "trailing": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trailing"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "title": "ListItem",
+      "type": "object"
+    },
+    "Section": {
+      "properties": {
+        "type": {
+          "const": "section",
+          "default": "section",
+          "title": "Type",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "blocks": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "action_row": "#/$defs/ActionRow",
+                "image_card": "#/$defs/ImageCard",
+                "insight_card": "#/$defs/InsightCard",
+                "list": "#/$defs/ListBlock",
+                "stat_row": "#/$defs/StatRow",
+                "text": "#/$defs/TextBlock"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/TextBlock"
+              },
+              {
+                "$ref": "#/$defs/InsightCard"
+              },
+              {
+                "$ref": "#/$defs/StatRow"
+              },
+              {
+                "$ref": "#/$defs/ImageCard"
+              },
+              {
+                "$ref": "#/$defs/ListBlock"
+              },
+              {
+                "$ref": "#/$defs/ActionRow"
+              }
+            ]
+          },
+          "title": "Blocks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "blocks"
+      ],
+      "title": "Section",
+      "type": "object"
+    },
+    "Stat": {
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        },
+        "delta": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delta"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "title": "Stat",
+      "type": "object"
+    },
+    "StatRow": {
+      "properties": {
+        "type": {
+          "const": "stat_row",
+          "default": "stat_row",
+          "title": "Type",
+          "type": "string"
+        },
+        "stats": {
+          "items": {
+            "$ref": "#/$defs/Stat"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "title": "Stats",
+          "type": "array"
+        }
+      },
+      "required": [
+        "stats"
+      ],
+      "title": "StatRow",
+      "type": "object"
+    },
+    "TextBlock": {
+      "properties": {
+        "type": {
+          "const": "text",
+          "default": "text",
+          "title": "Type",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "variant": {
+          "default": "body",
+          "enum": [
+            "body",
+            "title",
+            "subtitle",
+            "caption"
+          ],
+          "title": "Variant",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "TextBlock",
+      "type": "object"
+    }
+  },
+  "description": "Top-level payload for any screen the client renders.",
+  "properties": {
+    "type": {
+      "const": "screen",
+      "default": "screen",
+      "title": "Type",
+      "type": "string"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "sections": {
+      "items": {
+        "$ref": "#/$defs/Section"
+      },
+      "title": "Sections",
+      "type": "array"
+    }
+  },
+  "required": [
+    "title",
+    "sections"
+  ],
+  "title": "Screen",
+  "type": "object"
+}

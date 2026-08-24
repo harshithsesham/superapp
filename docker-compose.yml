@@ -1,0 +1,31 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: superapp
+      POSTGRES_PASSWORD: superapp
+      POSTGRES_DB: superapp
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superapp"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./apps/api
+    environment:
+      SUPERAPP_DATABASE_URL: postgresql+psycopg2://superapp:superapp@db:5432/superapp
+      SUPERAPP_API_TOKEN: ${SUPERAPP_API_TOKEN:-dev-token-change-me}
+      SUPERAPP_ANTHROPIC_API_KEY: ${SUPERAPP_ANTHROPIC_API_KEY:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

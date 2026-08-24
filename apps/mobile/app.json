@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "Super App",
+    "slug": "super-app",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": { "supportsTablet": false, "bundleIdentifier": "com.harshith.superapp" },
+    "android": { "package": "com.harshith.superapp" },
+    "extra": {
+      "apiUrl": "http://localhost:8000",
+      "apiToken": "dev-token-change-me"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+superapp.db
+
+# Node / Expo
+node_modules/
+.expo/
+dist/
+
+# Env & secrets
+.env
+*.pem
+
+# OS
+.DS_Store
