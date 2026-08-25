@@ -79,13 +79,18 @@ set -a && . ../../.env && set +a && npx expo run:ios
 
 ## Phase 4 — connect their Gmail (read-only)
 
+Preferred: in the app, on My Hub, the USER taps **Connect inbox** — an in-app
+browser opens Google consent, and approval bounces them straight back into the
+app. The "Google hasn't verified this app" warning is expected — Continue.
+The consent grant is theirs to tap, never yours.
+
+Fallback (if the in-app browser misbehaves):
 ```
 set -a && . ./.env && set +a
 curl -s http://localhost:8000/v1/gmail/auth-url -H "Authorization: Bearer $SUPERAPP_API_TOKEN"
 ```
-Give the USER the returned URL to open and approve themselves (the "Google
-hasn't verified this app" warning is expected — Continue). The consent grant is
-theirs to click, never yours. On success the callback prints their address.
+and have the USER open the returned URL in any browser; the success page
+confirms their address.
 No backfill happens: only NEW mail in their Primary tab is ever processed.
 Testing-mode apps expire refresh tokens after ~7 days — re-run this phase when
 sync starts failing with auth errors.
