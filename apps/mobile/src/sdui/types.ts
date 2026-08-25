@@ -51,6 +51,76 @@ export type ListBlock = {
   items: ListItem[];
 };
 
+export type GridImage = {
+  id: string;
+  image_url: string;
+  label?: string | null;
+};
+
+export type ImageGrid = {
+  type: "image_grid";
+  items: GridImage[];
+  columns?: 2 | 3 | 4;
+};
+
+export type OutfitItem = {
+  garment_id: string;
+  image_url?: string | null;
+  label: string;
+};
+
+export type OutfitCard = {
+  type: "outfit_card";
+  id: string;
+  agent: string;
+  title: string;
+  occasion?: string | null;
+  rationale: string;
+  items: OutfitItem[];
+};
+
+export type AgentStat = {
+  n: string;
+  label: string;
+  accent?: boolean;
+};
+
+export type AgentCard = {
+  type: "agent_card";
+  id: string;
+  agent: string;
+  name: string;
+  sub: string;
+  live?: boolean;
+  headline: string;
+  body: string;
+  stats?: AgentStat[];
+  screen?: string | null;
+};
+
+export type AgentGridItem = {
+  screen: string;
+  name: string;
+  sub: string;
+  tone?: "indigo" | "mint" | "amber" | "rose";
+};
+
+export type AgentGrid = {
+  type: "agent_grid";
+  items: AgentGridItem[];
+};
+
+export type DraftCard = {
+  type: "draft_card";
+  id: string;
+  agent: string;
+  from_name: string;
+  subject: string;
+  why: string;
+  draft: string;
+  status?: "waiting" | "edited" | "sent" | "dismissed";
+};
+
 export type Action = {
   id: string;
   label: string;
@@ -62,7 +132,7 @@ export type ActionRow = {
   actions: Action[];
 };
 
-export type LeafBlock = TextBlock | InsightCard | StatRow | ImageCard | ListBlock | ActionRow;
+export type LeafBlock = TextBlock | InsightCard | StatRow | ImageCard | ListBlock | ImageGrid | OutfitCard | AgentCard | AgentGrid | DraftCard | ActionRow;
 
 export type Section = {
   type: "section";
@@ -72,6 +142,7 @@ export type Section = {
 
 export type Screen = {
   type: "screen";
+  theme?: "light" | "dark";
   version?: number;
   title: string;
   sections: Section[];

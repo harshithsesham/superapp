@@ -1,0 +1,51 @@
+# Production stack: Postgres (not exposed), API (internal only), Caddy (HTTPS).
+# Run from the repo root:
+#   docker compose -f deploy/docker-compose.prod.yml up -d --build
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: superapp
+      POSTGRES_PASSWORD: ${SUPERAPP_DB_PASSWORD:?set in .env}
+      POSTGRES_DB: superapp
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superapp"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api:
+    build:
+      context: ../apps/api
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      SUPERAPP_DATABASE_URL: postgresql+psycopg2://superapp:${SUPERAPP_DB_PASSWORD}@db:5432/superapp
+    volumes:
+      - media:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+    # no ports: only Caddy reaches it
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SUPERAPP_DOMAIN: ${SUPERAPP_DOMAIN:?set in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  media:
+  caddy_data:

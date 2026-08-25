@@ -59,6 +59,90 @@ class ListBlock(BaseModel):
     items: list[ListItem]
 
 
+class GridImage(BaseModel):
+    id: str
+    image_url: str
+    label: str | None = None
+
+
+class ImageGrid(BaseModel):
+    """Thumbnail grid (the closet). Taps log a reaction with the item id."""
+
+    type: Literal["image_grid"] = "image_grid"
+    items: list[GridImage]
+    columns: Literal[2, 3, 4] = 3
+
+
+class OutfitItem(BaseModel):
+    garment_id: str
+    image_url: str | None = None
+    label: str
+
+
+class OutfitCard(BaseModel):
+    """One suggested outfit: garment strip + rationale + like/dislike.
+    The client posts outfit_liked / outfit_rejected reactions with this id."""
+
+    type: Literal["outfit_card"] = "outfit_card"
+    id: str
+    agent: str
+    title: str
+    occasion: str | None = None
+    rationale: str
+    items: list[OutfitItem]
+
+
+class AgentStat(BaseModel):
+    n: str
+    label: str
+    accent: bool = False  # mint highlight (the "37 handled" number)
+
+
+class AgentCard(BaseModel):
+    """The hero card (Nano V1 "My Hub"): one agent, its live status, a serif
+    headline, and inline stat cells."""
+
+    type: Literal["agent_card"] = "agent_card"
+    id: str
+    agent: str
+    name: str
+    sub: str
+    live: bool = False
+    headline: str
+    body: str
+    stats: list[AgentStat] = Field(default_factory=list)
+    screen: str | None = None  # tapping the card navigates here (client-side)
+
+
+class AgentGridItem(BaseModel):
+    screen: str  # navigation target
+    name: str
+    sub: str  # live one-liner ("370 kcal today")
+    tone: Literal["indigo", "mint", "amber", "rose"] = "indigo"
+
+
+class AgentGrid(BaseModel):
+    """The hub's agent roster (Nano V1 "Coming to your Hub", except ours are live)."""
+
+    type: Literal["agent_grid"] = "agent_grid"
+    items: list[AgentGridItem]
+
+
+class DraftCard(BaseModel):
+    """A reply written and waiting (the Nano inbox). The client owns the feel:
+    inline editing, optimistic send, defer. id is the draft id; the client
+    calls the draft endpoints and logs reactions."""
+
+    type: Literal["draft_card"] = "draft_card"
+    id: str
+    agent: str
+    from_name: str
+    subject: str
+    why: str  # urgency chip, e.g. "deadline today EOD"
+    draft: str
+    status: Literal["waiting", "edited", "sent", "dismissed"] = "waiting"
+
+
 class Action(BaseModel):
     id: str  # posted back to /v1/actions when tapped; irreversible things require this tap
     label: str
@@ -71,7 +155,7 @@ class ActionRow(BaseModel):
 
 
 LeafBlock = Annotated[
-    Union[TextBlock, InsightCard, StatRow, ImageCard, ListBlock, ActionRow],
+    Union[TextBlock, InsightCard, StatRow, ImageCard, ListBlock, ImageGrid, OutfitCard, AgentCard, AgentGrid, DraftCard, ActionRow],
     Field(discriminator="type"),
 ]
 
@@ -86,6 +170,9 @@ class Screen(BaseModel):
     """Top-level payload for any screen the client renders."""
 
     type: Literal["screen"] = "screen"
+    # Surface mood — the client renders its light or dark palette. Additive,
+    # so no version bump; old clients ignore it.
+    theme: Literal["light", "dark"] = "light"
     # Contract version, bumped on breaking changes only. Clients compare against
     # their supported version and prompt for an app update when behind; unknown
     # blocks within a version degrade silently.

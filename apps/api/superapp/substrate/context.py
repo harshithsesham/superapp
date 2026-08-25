@@ -16,6 +16,7 @@ from .facts import read_facts
 # Adding a vertical = adding a line here; it inherits everything on day one.
 AGENT_SCOPES: dict[str, list[str] | None] = {
     "demo": None,  # None = wildcard
+    "hub": None,  # the home screen: render-only, sees everything
     "orchestrator": None,
     "nutrition": ["nutrition", "goals", "health"],
     "finance": ["finance", "goals"],
@@ -26,9 +27,14 @@ AGENT_SCOPES: dict[str, list[str] | None] = {
 # Domain twin loaders: extra per-domain data included in the slice when the
 # agent's scope covers that domain. Twins hold records; facts hold beliefs.
 def _twin_loaders() -> dict:
-    from . import nutrition
+    from . import finance, inbox, nutrition, wardrobe
 
-    return {"nutrition": nutrition.meals_context}
+    return {
+        "nutrition": nutrition.meals_context,
+        "finance": finance.finance_context,
+        "wardrobe": wardrobe.wardrobe_context,
+        "inbox": inbox.inbox_context,
+    }
 
 
 # Telemetry that would only waste prompt budget: screen views and cost logs are

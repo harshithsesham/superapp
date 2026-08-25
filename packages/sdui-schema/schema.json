@@ -52,6 +52,241 @@
       "title": "ActionRow",
       "type": "object"
     },
+    "AgentCard": {
+      "description": "The hero card (Nano V1 \"My Hub\"): one agent, its live status, a serif\nheadline, and inline stat cells.",
+      "properties": {
+        "type": {
+          "const": "agent_card",
+          "default": "agent_card",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "agent": {
+          "title": "Agent",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "sub": {
+          "title": "Sub",
+          "type": "string"
+        },
+        "live": {
+          "default": false,
+          "title": "Live",
+          "type": "boolean"
+        },
+        "headline": {
+          "title": "Headline",
+          "type": "string"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "stats": {
+          "items": {
+            "$ref": "#/$defs/AgentStat"
+          },
+          "title": "Stats",
+          "type": "array"
+        },
+        "screen": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Screen"
+        }
+      },
+      "required": [
+        "id",
+        "agent",
+        "name",
+        "sub",
+        "headline",
+        "body"
+      ],
+      "title": "AgentCard",
+      "type": "object"
+    },
+    "AgentGrid": {
+      "description": "The hub's agent roster (Nano V1 \"Coming to your Hub\", except ours are live).",
+      "properties": {
+        "type": {
+          "const": "agent_grid",
+          "default": "agent_grid",
+          "title": "Type",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/AgentGridItem"
+          },
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "AgentGrid",
+      "type": "object"
+    },
+    "AgentGridItem": {
+      "properties": {
+        "screen": {
+          "title": "Screen",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "sub": {
+          "title": "Sub",
+          "type": "string"
+        },
+        "tone": {
+          "default": "indigo",
+          "enum": [
+            "indigo",
+            "mint",
+            "amber",
+            "rose"
+          ],
+          "title": "Tone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "screen",
+        "name",
+        "sub"
+      ],
+      "title": "AgentGridItem",
+      "type": "object"
+    },
+    "AgentStat": {
+      "properties": {
+        "n": {
+          "title": "N",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "accent": {
+          "default": false,
+          "title": "Accent",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "n",
+        "label"
+      ],
+      "title": "AgentStat",
+      "type": "object"
+    },
+    "DraftCard": {
+      "description": "A reply written and waiting (the Nano inbox). The client owns the feel:\ninline editing, optimistic send, defer. id is the draft id; the client\ncalls the draft endpoints and logs reactions.",
+      "properties": {
+        "type": {
+          "const": "draft_card",
+          "default": "draft_card",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "agent": {
+          "title": "Agent",
+          "type": "string"
+        },
+        "from_name": {
+          "title": "From Name",
+          "type": "string"
+        },
+        "subject": {
+          "title": "Subject",
+          "type": "string"
+        },
+        "why": {
+          "title": "Why",
+          "type": "string"
+        },
+        "draft": {
+          "title": "Draft",
+          "type": "string"
+        },
+        "status": {
+          "default": "waiting",
+          "enum": [
+            "waiting",
+            "edited",
+            "sent",
+            "dismissed"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "agent",
+        "from_name",
+        "subject",
+        "why",
+        "draft"
+      ],
+      "title": "DraftCard",
+      "type": "object"
+    },
+    "GridImage": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "image_url": {
+          "title": "Image Url",
+          "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        }
+      },
+      "required": [
+        "id",
+        "image_url"
+      ],
+      "title": "GridImage",
+      "type": "object"
+    },
     "ImageCard": {
       "properties": {
         "type": {
@@ -93,6 +328,39 @@
         "image_url"
       ],
       "title": "ImageCard",
+      "type": "object"
+    },
+    "ImageGrid": {
+      "description": "Thumbnail grid (the closet). Taps log a reaction with the item id.",
+      "properties": {
+        "type": {
+          "const": "image_grid",
+          "default": "image_grid",
+          "title": "Type",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/GridImage"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "columns": {
+          "default": 3,
+          "enum": [
+            2,
+            3,
+            4
+          ],
+          "title": "Columns",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "ImageGrid",
       "type": "object"
     },
     "InsightCard": {
@@ -228,6 +496,91 @@
       "title": "ListItem",
       "type": "object"
     },
+    "OutfitCard": {
+      "description": "One suggested outfit: garment strip + rationale + like/dislike.\nThe client posts outfit_liked / outfit_rejected reactions with this id.",
+      "properties": {
+        "type": {
+          "const": "outfit_card",
+          "default": "outfit_card",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "agent": {
+          "title": "Agent",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "occasion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Occasion"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/OutfitItem"
+          },
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "agent",
+        "title",
+        "rationale",
+        "items"
+      ],
+      "title": "OutfitCard",
+      "type": "object"
+    },
+    "OutfitItem": {
+      "properties": {
+        "garment_id": {
+          "title": "Garment Id",
+          "type": "string"
+        },
+        "image_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image Url"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "garment_id",
+        "label"
+      ],
+      "title": "OutfitItem",
+      "type": "object"
+    },
     "Section": {
       "properties": {
         "type": {
@@ -253,9 +606,14 @@
             "discriminator": {
               "mapping": {
                 "action_row": "#/$defs/ActionRow",
+                "agent_card": "#/$defs/AgentCard",
+                "agent_grid": "#/$defs/AgentGrid",
+                "draft_card": "#/$defs/DraftCard",
                 "image_card": "#/$defs/ImageCard",
+                "image_grid": "#/$defs/ImageGrid",
                 "insight_card": "#/$defs/InsightCard",
                 "list": "#/$defs/ListBlock",
+                "outfit_card": "#/$defs/OutfitCard",
                 "stat_row": "#/$defs/StatRow",
                 "text": "#/$defs/TextBlock"
               },
@@ -276,6 +634,21 @@
               },
               {
                 "$ref": "#/$defs/ListBlock"
+              },
+              {
+                "$ref": "#/$defs/ImageGrid"
+              },
+              {
+                "$ref": "#/$defs/OutfitCard"
+              },
+              {
+                "$ref": "#/$defs/AgentCard"
+              },
+              {
+                "$ref": "#/$defs/AgentGrid"
+              },
+              {
+                "$ref": "#/$defs/DraftCard"
               },
               {
                 "$ref": "#/$defs/ActionRow"
@@ -395,6 +768,15 @@
       "const": "screen",
       "default": "screen",
       "title": "Type",
+      "type": "string"
+    },
+    "theme": {
+      "default": "light",
+      "enum": [
+        "light",
+        "dark"
+      ],
+      "title": "Theme",
       "type": "string"
     },
     "version": {

@@ -1,8 +1,9 @@
 // The thin renderer (architecture §3): agents choose WHICH components and WHAT
 // content; how they look was decided once, here. Adding a component to the
 // registry = adding a case to this switch + a type in types.ts + blocks.py.
-import React from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useState } from "react";
+import { Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import type { LeafBlock, Screen, Section } from "./types";
 
 type ReactionFn = (kind: string, targetId: string, agent?: string) => void;
@@ -10,21 +11,40 @@ type ReactionFn = (kind: string, targetId: string, agent?: string) => void;
 // Media served by the API is auth-gated and returned as relative URLs.
 type MediaCtx = { baseUrl: string; headers?: Record<string, string> };
 
-type RenderCtx = { onReaction: ReactionFn; media?: MediaCtx };
+export type DraftActionFn = (
+  action: "send" | "defer" | "save",
+  draftId: string,
+  body?: string
+) => void;
+
+export type NavigateFn = (screen: string) => void;
+
+type RenderCtx = {
+  onReaction: ReactionFn;
+  media?: MediaCtx;
+  onDraftAction?: DraftActionFn;
+  onNavigate?: NavigateFn;
+  dark?: boolean;
+};
 
 export function SduiScreen({
   screen,
   onReaction,
   media,
+  onDraftAction,
+  onNavigate,
 }: {
   screen: Screen;
   onReaction: ReactionFn;
   media?: MediaCtx;
+  onDraftAction?: DraftActionFn;
+  onNavigate?: NavigateFn;
 }) {
-  const ctx: RenderCtx = { onReaction, media };
+  const dark = screen.theme === "dark";
+  const ctx: RenderCtx = { onReaction, media, onDraftAction, onNavigate, dark };
   return (
     <View>
-      <Text style={s.screenTitle}>{screen.title}</Text>
+      <Text style={[s.screenTitle, dark && dk.screenTitle]}>{screen.title}</Text>
       {screen.sections.map((section, i) => (
         <SduiSection key={i} section={section} ctx={ctx} />
       ))}
@@ -35,7 +55,9 @@ export function SduiScreen({
 function SduiSection({ section, ctx }: { section: Section; ctx: RenderCtx }) {
   return (
     <View style={s.section}>
-      {section.title ? <Text style={s.sectionTitle}>{section.title}</Text> : null}
+      {section.title ? (
+        <Text style={[s.sectionTitle, ctx.dark && dk.sectionTitle]}>{section.title}</Text>
+      ) : null}
       {section.blocks.map((block, i) => (
         <Block key={i} block={block} ctx={ctx} />
       ))}
@@ -43,8 +65,197 @@ function SduiSection({ section, ctx }: { section: Section; ctx: RenderCtx }) {
   );
 }
 
+function AgentCardView({ block }: { block: Extract<LeafBlock, { type: "agent_card" }> }) {
+  return (
+    <LinearGradient
+      colors={["#2A2050", "#140F26", "#08070E"]}
+      start={{ x: 0.2, y: 0 }}
+      end={{ x: 0.6, y: 1 }}
+      style={ac.card}
+    >
+      <View style={ac.header}>
+        <LinearGradient colors={["#818CF8", "#4338CA"]} style={ac.tile}>
+          <Text style={ac.tileText}>{block.name[0]}</Text>
+        </LinearGradient>
+        <View style={{ flex: 1, marginLeft: 10 }}>
+          <Text style={ac.name}>{block.name}</Text>
+          <Text style={ac.sub}>{block.sub}</Text>
+        </View>
+        {block.live ? <Text style={ac.live}>LIVE</Text> : null}
+      </View>
+      <Text style={ac.headline}>{block.headline}</Text>
+      <Text style={ac.body}>{block.body}</Text>
+      {block.stats?.length ? (
+        <View style={ac.statRow}>
+          {(block.stats ?? []).map((st, i) => (
+            <View key={i} style={ac.statCell}>
+              <Text style={[ac.statN, st.accent && ac.statAccent]}>{st.n}</Text>
+              <Text style={ac.statLabel}>{st.label.toUpperCase()}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </LinearGradient>
+  );
+}
+
+const ac = StyleSheet.create({
+  card: {
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(199,184,255,0.16)",
+    padding: 18,
+    marginTop: 10,
+  },
+  header: { flexDirection: "row", alignItems: "center" },
+  tile: { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  tileText: { fontFamily: "InstrumentSerif_400Regular", fontSize: 17, color: "#FFFFFF" },
+  name: { fontFamily: "InstrumentSans_600SemiBold", fontSize: 15, color: "#F4F2FA" },
+  sub: { fontFamily: "InstrumentSans_400Regular", fontSize: 11, color: "#8A87A3", marginTop: 1 },
+  live: { fontFamily: "JetBrainsMono_400Regular", fontSize: 10, color: "#7CF7C4", letterSpacing: 2 },
+  headline: {
+    fontFamily: "InstrumentSerif_400Regular",
+    fontSize: 27,
+    lineHeight: 32,
+    color: "#F4F2FA",
+    marginTop: 14,
+  },
+  body: {
+    fontFamily: "InstrumentSans_400Regular",
+    fontSize: 13,
+    lineHeight: 19,
+    color: "#B9B4CC",
+    marginTop: 6,
+  },
+  statRow: { flexDirection: "row", gap: 8, marginTop: 14 },
+  statCell: {
+    flex: 1,
+    backgroundColor: "rgba(8,7,14,0.55)",
+    borderWidth: 1,
+    borderColor: "rgba(199,184,255,0.10)",
+    borderRadius: 12,
+    padding: 10,
+  },
+  statN: { fontFamily: "InstrumentSerif_400Regular", fontSize: 22, color: "#F4F2FA" },
+  statAccent: { color: "#7CF7C4" },
+  statLabel: {
+    fontFamily: "JetBrainsMono_400Regular",
+    fontSize: 8,
+    letterSpacing: 0.8,
+    color: "#8A87A3",
+    marginTop: 4,
+  },
+});
+
+const ag = StyleSheet.create({
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 6 },
+  cell: {
+    width: "47.5%",
+    backgroundColor: "#14101F",
+    borderWidth: 1,
+    borderColor: "rgba(199,184,255,0.10)",
+    borderRadius: 18,
+    padding: 14,
+  },
+  tile: {
+    width: 30, height: 30, borderRadius: 9,
+    alignItems: "center", justifyContent: "center", marginBottom: 10,
+  },
+  tile_indigo: { backgroundColor: "#5B49C9" },
+  tile_mint: { backgroundColor: "#1E7A5C" },
+  tile_amber: { backgroundColor: "#8A6420" },
+  tile_rose: { backgroundColor: "#A34B60" },
+  tileText: { fontFamily: "InstrumentSerif_400Regular", fontSize: 15, color: "#FFFFFF" },
+  name: { fontFamily: "InstrumentSans_600SemiBold", fontSize: 14, color: "#F4F2FA" },
+  sub: {
+    fontFamily: "InstrumentSans_400Regular", fontSize: 11.5,
+    color: "#8A87A3", marginTop: 3, lineHeight: 15,
+  },
+});
+
+function DraftCardView({
+  block,
+  onDraftAction,
+  dark,
+}: {
+  block: Extract<LeafBlock, { type: "draft_card" }>;
+  onDraftAction?: DraftActionFn;
+  dark?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(block.draft);
+  return (
+    <View style={[s.draftCard, dark && dk.card]}>
+      <View style={s.draftTop}>
+        <Text style={[s.draftFrom, dark && dk.ink]}>{block.from_name}</Text>
+        {block.why ? (
+          <Text style={[s.whyChip, dark && dk.whyChip]}>{block.why.toUpperCase()}</Text>
+        ) : null}
+      </View>
+      <Text style={[s.draftSubject, dark && dk.caption]}>{block.subject}</Text>
+      <Text style={[s.draftLabel, dark && dk.mono]}>WRITTEN AND WAITING</Text>
+      {editing ? (
+        <TextInput
+          style={[s.draftEdit, dark && dk.draftEdit]}
+          value={text}
+          onChangeText={setText}
+          multiline
+          autoFocus
+        />
+      ) : (
+        <Text style={[s.draftBody, dark && dk.draftBody]}>{text}</Text>
+      )}
+      <View style={s.outfitActions}>
+        {editing ? (
+          <>
+            <Pressable
+              style={[s.voteButton, dark && dk.voteButton]}
+              onPress={() => {
+                setEditing(false);
+                onDraftAction?.("save", block.id, text);
+              }}
+            >
+              <Text style={[s.voteText, dark && dk.voteText]}>Save</Text>
+            </Pressable>
+            <Pressable
+              style={[s.voteButton, s.voteButtonMuted, dark && dk.voteButtonMuted]}
+              onPress={() => {
+                setText(block.draft);
+                setEditing(false);
+              }}
+            >
+              <Text style={[s.voteText, s.voteTextMuted, dark && dk.caption]}>Cancel</Text>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <Pressable
+              style={[s.voteButton, dark && dk.voteButton]}
+              onPress={() => onDraftAction?.("send", block.id)}
+            >
+              <Text style={[s.voteText, dark && dk.voteText]}>Send it</Text>
+            </Pressable>
+            <Pressable
+              style={[s.voteButton, s.voteButtonMuted, dark && dk.voteButtonMuted]}
+              onPress={() => setEditing(true)}
+            >
+              <Text style={[s.voteText, s.voteTextMuted, dark && dk.caption]}>Change it</Text>
+            </Pressable>
+            <Pressable
+              style={[s.voteButton, s.voteButtonMuted, dark && dk.voteButtonMuted, { flex: 0.6 }]}
+              onPress={() => onDraftAction?.("defer", block.id)}
+            >
+              <Text style={[s.voteText, s.voteTextMuted, dark && dk.caption]}>6pm</Text>
+            </Pressable>
+          </>
+        )}
+      </View>
+    </View>
+  );
+}
+
 function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
-  const { onReaction, media } = ctx;
+  const { onReaction, media, dark } = ctx;
   switch (block.type) {
     case "text": {
       const style =
@@ -55,16 +266,24 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
           : block.variant === "caption"
           ? s.caption
           : s.body;
-      return <Text style={style}>{block.text}</Text>;
+      const darkStyle =
+        block.variant === "title"
+          ? dk.title
+          : block.variant === "subtitle"
+          ? dk.subtitle
+          : block.variant === "caption"
+          ? dk.caption
+          : dk.body;
+      return <Text style={[style, dark && darkStyle]}>{block.text}</Text>;
     }
 
     case "insight_card": {
       const accent =
         block.emphasis === "positive" ? "#1E7F4F" : block.emphasis === "warning" ? "#B3261E" : "#3B3B3B";
       return (
-        <View style={[s.card, { borderLeftColor: accent }]}>
+        <View style={[s.card, dark && dk.card, { borderLeftColor: accent }]}>
           <View style={s.cardHeader}>
-            <Text style={s.cardTitle}>{block.title}</Text>
+            <Text style={[s.cardTitle, dark && dk.ink]}>{block.title}</Text>
             <Pressable
               hitSlop={12}
               onPress={() => onReaction("insight_dismissed", block.id, block.agent)}
@@ -72,7 +291,7 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
               <Text style={s.dismiss}>✕</Text>
             </Pressable>
           </View>
-          <Text style={s.cardBody}>{block.body}</Text>
+          <Text style={[s.cardBody, dark && dk.bodyText]}>{block.body}</Text>
           {block.action_label && block.action_id ? (
             <Pressable
               style={s.cardAction}
@@ -88,10 +307,10 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
 
     case "stat_row":
       return (
-        <View style={s.statRow}>
+        <View style={[s.statRow, dark && dk.card]}>
           {block.stats.map((stat, i) => (
-            <View key={i} style={s.stat}>
-              <Text style={s.statValue}>
+            <View key={i} style={[s.stat, dark && dk.statCell]}>
+              <Text style={[s.statValue, dark && dk.ink]}>
                 {stat.value}
                 {stat.unit ? <Text style={s.statUnit}> {stat.unit}</Text> : null}
               </Text>
@@ -100,7 +319,7 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
                   {stat.delta}
                 </Text>
               ) : null}
-              <Text style={s.statLabel}>{stat.label}</Text>
+              <Text style={[s.statLabel, dark && dk.mono]}>{stat.label}</Text>
             </View>
           ))}
         </View>
@@ -121,18 +340,121 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
 
     case "list":
       return (
-        <View style={s.card}>
+        <View style={[s.card, dark && dk.card]}>
           {block.items.map((item) => (
             <View key={item.id} style={s.listItem}>
               <View style={{ flex: 1 }}>
-                <Text style={s.body}>{item.title}</Text>
-                {item.subtitle ? <Text style={s.caption}>{item.subtitle}</Text> : null}
+                <Text style={[s.body, dark && dk.ink]}>{item.title}</Text>
+                {item.subtitle ? (
+                  <Text style={[s.caption, dark && dk.caption]}>{item.subtitle}</Text>
+                ) : null}
               </View>
-              {item.trailing ? <Text style={s.trailing}>{item.trailing}</Text> : null}
+              {item.trailing ? <Text style={[s.trailing, dark && dk.body]}>{item.trailing}</Text> : null}
             </View>
           ))}
         </View>
       );
+
+    case "image_grid": {
+      const cols = block.columns ?? 3;
+      return (
+        <View style={s.grid}>
+          {block.items.map((item) => {
+            const uri = item.image_url.startsWith("/")
+              ? `${media?.baseUrl ?? ""}${item.image_url}`
+              : item.image_url;
+            return (
+              <View key={item.id} style={[s.gridCell, { width: `${100 / cols - 2}%` }]}>
+                <Image source={{ uri, headers: media?.headers }} style={s.gridImage} resizeMode="cover" />
+                {item.label ? (
+                  <Text style={s.gridLabel} numberOfLines={1}>
+                    {item.label}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          })}
+        </View>
+      );
+    }
+
+    case "outfit_card":
+      return (
+        <View style={s.outfitCard}>
+          <View style={s.outfitHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.outfitTitle}>{block.title}</Text>
+              {block.occasion ? <Text style={s.outfitOccasion}>{block.occasion}</Text> : null}
+            </View>
+          </View>
+          <View style={s.outfitStrip}>
+            {block.items.map((item) => {
+              const uri =
+                item.image_url && item.image_url.startsWith("/")
+                  ? `${media?.baseUrl ?? ""}${item.image_url}`
+                  : item.image_url;
+              return (
+                <View key={item.garment_id} style={s.outfitItem}>
+                  {uri ? (
+                    <Image source={{ uri, headers: media?.headers }} style={s.outfitThumb} resizeMode="cover" />
+                  ) : (
+                    <View style={[s.outfitThumb, s.outfitThumbEmpty]} />
+                  )}
+                  <Text style={s.gridLabel} numberOfLines={1}>
+                    {item.label}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+          <Text style={s.cardBody}>{block.rationale}</Text>
+          <View style={s.outfitActions}>
+            <Pressable
+              style={s.voteButton}
+              onPress={() => onReaction("outfit_liked", block.id, block.agent)}
+            >
+              <Text style={s.voteText}>Wear it 👍</Text>
+            </Pressable>
+            <Pressable
+              style={[s.voteButton, s.voteButtonMuted]}
+              onPress={() => onReaction("outfit_rejected", block.id, block.agent)}
+            >
+              <Text style={[s.voteText, s.voteTextMuted]}>Not for me</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+
+    case "agent_card": {
+      const card = <AgentCardView block={block} />;
+      return block.screen ? (
+        <Pressable onPress={() => ctx.onNavigate?.(block.screen!)}>{card}</Pressable>
+      ) : (
+        card
+      );
+    }
+
+    case "agent_grid":
+      return (
+        <View style={ag.grid}>
+          {block.items.map((item) => (
+            <Pressable
+              key={item.screen}
+              style={ag.cell}
+              onPress={() => ctx.onNavigate?.(item.screen)}
+            >
+              <View style={[ag.tile, ag[`tile_${item.tone ?? "indigo"}` as keyof typeof ag] as object]}>
+                <Text style={ag.tileText}>{item.name[0]}</Text>
+              </View>
+              <Text style={ag.name}>{item.name}</Text>
+              <Text style={ag.sub} numberOfLines={2}>{item.sub}</Text>
+            </Pressable>
+          ))}
+        </View>
+      );
+
+    case "draft_card":
+      return <DraftCardView block={block} onDraftAction={ctx.onDraftAction} dark={dark} />;
 
     case "action_row":
       return (
@@ -142,12 +464,19 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
               key={action.id}
               style={[
                 s.action,
+                dark && dk.action,
                 action.style === "secondary" && s.actionSecondary,
                 action.style === "destructive" && s.actionDestructive,
               ]}
               onPress={() => onReaction("action_tapped", action.id)}
             >
-              <Text style={[s.actionText, action.style === "secondary" && s.actionTextSecondary]}>
+              <Text
+                style={[
+                  s.actionText,
+                  action.style === "secondary" && s.actionTextSecondary,
+                  dark && dk.actionText,
+                ]}
+              >
                 {action.label}
               </Text>
             </Pressable>
@@ -160,7 +489,139 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
   }
 }
 
+// Nano V1 palette — indigo black, lavender accent, mint for live/positive,
+// Instrument Serif display over JetBrains Mono micro-labels.
+const dk = StyleSheet.create({
+  screenTitle: { color: "#F4F2FA", fontFamily: "InstrumentSerif_400Regular", fontWeight: "400" },
+  sectionTitle: {
+    color: "#8A87A3",
+    fontFamily: "JetBrainsMono_400Regular",
+    textTransform: "uppercase",
+    fontSize: 10,
+    letterSpacing: 1.6,
+    fontWeight: "400",
+  },
+  ink: { color: "#F4F2FA" },
+  title: { color: "#F4F2FA", fontFamily: "InstrumentSerif_400Regular", fontWeight: "400" },
+  subtitle: { color: "#B9B4CC" },
+  body: { color: "#B9B4CC" },
+  bodyText: { color: "#B9B4CC" },
+  caption: { color: "#8A87A3" },
+  mono: {
+    color: "#8A87A3",
+    fontFamily: "JetBrainsMono_400Regular",
+    fontSize: 9,
+    letterSpacing: 1,
+  },
+  card: {
+    backgroundColor: "#14101F",
+    borderWidth: 1,
+    borderColor: "rgba(199,184,255,0.10)",
+    shadowOpacity: 0,
+  },
+  statCell: { backgroundColor: "#14101F" },
+  whyChip: {
+    color: "#FF9DA8",
+    backgroundColor: "rgba(255,157,168,0.12)",
+    fontFamily: "JetBrainsMono_400Regular",
+  },
+  draftBody: {
+    color: "#D6D2E6",
+    borderLeftColor: "rgba(199,184,255,0.30)",
+    fontFamily: "InstrumentSerif_400Regular",
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  draftEdit: { color: "#F4F2FA", borderColor: "rgba(199,184,255,0.25)", backgroundColor: "#0E0C18" },
+  voteButton: { backgroundColor: "#C7B8FF" },
+  voteText: { color: "#14101F" },
+  voteButtonMuted: { backgroundColor: "#221C36" },
+  action: { backgroundColor: "#C7B8FF" },
+  actionText: { color: "#14101F" },
+});
+
 const s = StyleSheet.create({
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
+  gridCell: {},
+  gridImage: { width: "100%", aspectRatio: 0.85, borderRadius: 14, backgroundColor: "#ECEAE6" },
+  gridLabel: { fontSize: 11, color: "#8A8781", marginTop: 4 },
+  outfitCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 16,
+    marginTop: 10,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  outfitHeader: { flexDirection: "row", alignItems: "flex-start" },
+  outfitTitle: { fontSize: 17, fontWeight: "700", color: "#1A1916", letterSpacing: -0.3 },
+  outfitOccasion: { fontSize: 12, color: "#8A8781", marginTop: 2, textTransform: "capitalize" },
+  outfitStrip: { flexDirection: "row", gap: 10, marginVertical: 12 },
+  outfitItem: { width: 72 },
+  outfitThumb: { width: 72, height: 88, borderRadius: 12, backgroundColor: "#ECEAE6" },
+  outfitThumbEmpty: { borderWidth: 1, borderColor: "#E2DFDA", borderStyle: "dashed" },
+  outfitActions: { flexDirection: "row", gap: 8, marginTop: 12 },
+  voteButton: {
+    flex: 1,
+    backgroundColor: "#1A1916",
+    borderRadius: 12,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  voteButtonMuted: { backgroundColor: "#F1EFEB" },
+  voteText: { color: "#FFF", fontWeight: "600", fontSize: 14 },
+  voteTextMuted: { color: "#6E6B65" },
+  draftCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 16,
+    marginTop: 10,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  draftTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  draftFrom: { fontSize: 16, fontWeight: "700", color: "#1A1916", letterSpacing: -0.2 },
+  whyChip: {
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    color: "#8A5A00",
+    backgroundColor: "#FBF0DC",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    overflow: "hidden",
+  },
+  draftSubject: { fontSize: 13, color: "#6E6B65", marginTop: 2 },
+  draftLabel: { fontSize: 10, fontWeight: "700", letterSpacing: 1, color: "#B0ACA4", marginTop: 12 },
+  draftBody: {
+    fontSize: 15,
+    lineHeight: 21,
+    color: "#3B3934",
+    marginTop: 6,
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: "#E4E1DB",
+    fontStyle: "italic",
+  },
+  draftEdit: {
+    fontSize: 15,
+    lineHeight: 21,
+    color: "#1A1916",
+    marginTop: 6,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: "#D8D5CF",
+    borderRadius: 10,
+    minHeight: 80,
+    textAlignVertical: "top",
+  },
   screenTitle: { fontSize: 32, fontWeight: "700", color: "#1A1A1A", marginBottom: 4 },
   section: { marginTop: 20 },
   sectionTitle: {

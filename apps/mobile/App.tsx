@@ -1,5 +1,10 @@
 import Constants from "expo-constants";
+import { useFonts } from "expo-font";
+import { InstrumentSans_400Regular, InstrumentSans_600SemiBold } from "@expo-google-fonts/instrument-sans";
+import { InstrumentSerif_400Regular } from "@expo-google-fonts/instrument-serif";
+import { JetBrainsMono_400Regular } from "@expo-google-fonts/jetbrains-mono";
 import * as ImagePicker from "expo-image-picker";
+import * as Notifications from "expo-notifications";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -23,12 +28,22 @@ const { apiUrl, apiToken } = (Constants.expoConfig?.extra ?? {}) as {
 };
 const AUTH = { Authorization: `Bearer ${apiToken}` };
 
+const SCREENS = ["hub", "inbox", "home", "finance", "stylist"] as const;
+type ScreenName = (typeof SCREENS)[number];
+
 export default function App() {
+  const [screenName, setScreenName] = useState<ScreenName>("hub");
   const [screen, setScreen] = useState<Screen | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [mealText, setMealText] = useState("");
+  const [fontsLoaded] = useFonts({
+    InstrumentSerif_400Regular,
+    InstrumentSans_400Regular,
+    InstrumentSans_600SemiBold,
+    JetBrainsMono_400Regular,
+  });
 
   const applyScreen = useCallback(async (res: globalThis.Response) => {
     if (!res.ok) throw new Error(`Couldn't reach the API: ${res.status}`);
@@ -48,7 +63,7 @@ export default function App() {
       try {
         setError(null);
         await applyScreen(
-          await fetch(`${apiUrl}/v1/screen/home${fresh ? "/refresh" : ""}`, {
+          await fetch(`${apiUrl}/v1/screen/${screenName}${fresh ? "/refresh" : ""}`, {
             method: fresh ? "POST" : "GET",
             headers: AUTH,
           })
@@ -59,12 +74,35 @@ export default function App() {
         setRefreshing(false);
       }
     },
-    [applyScreen]
+    [applyScreen, screenName]
   );
 
   useEffect(() => {
+    setScreen(null);
     load();
   }, [load]);
+
+  // Push registration — best-effort: in Expo Go without an EAS projectId this
+  // throws, and we silently stay push-less.
+  useEffect(() => {
+    (async () => {
+      try {
+        const perm = await Notifications.requestPermissionsAsync();
+        if (!perm.granted) return;
+        const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+        const { data } = await Notifications.getExpoPushTokenAsync(
+          projectId ? { projectId } : undefined
+        );
+        await fetch(`${apiUrl}/v1/devices/push-token`, {
+          method: "POST",
+          headers: { ...AUTH, "Content-Type": "application/json" },
+          body: JSON.stringify({ token: data }),
+        });
+      } catch {
+        // no push in this environment; fine
+      }
+    })();
+  }, []);
 
   const logMealText = useCallback(async () => {
     const description = mealText.trim();
@@ -87,7 +125,7 @@ export default function App() {
     }
   }, [mealText, busy, applyScreen]);
 
-  const logMealPhoto = useCallback(async () => {
+  const uploadPhoto = useCallback(async (endpoint: string) => {
     if (busy) return;
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     const result = perm.granted
@@ -107,7 +145,7 @@ export default function App() {
     try {
       setError(null);
       await applyScreen(
-        await fetch(`${apiUrl}/v1/nutrition/photo`, { method: "POST", headers: AUTH, body })
+        await fetch(`${apiUrl}${endpoint}`, { method: "POST", headers: AUTH, body })
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -116,17 +154,97 @@ export default function App() {
     }
   }, [busy, applyScreen]);
 
-  const onReaction = useCallback((kind: string, targetId: string, agent?: string) => {
-    fetch(`${apiUrl}/v1/reactions`, {
-      method: "POST",
-      headers: { ...AUTH, "Content-Type": "application/json" },
-      body: JSON.stringify({ kind, target_id: targetId, agent }),
-    }).catch(() => {});
+  const onNavigate = useCallback((screen: string) => {
+    if ((SCREENS as readonly string[]).includes(screen)) {
+      setScreenName(screen as ScreenName);
+    }
   }, []);
 
+  const syncInbox = useCallback(async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      setError(null);
+      await fetch(`${apiUrl}/v1/inbox/sync`, { method: "POST", headers: AUTH });
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [busy, load]);
+
+  const onDraftAction = useCallback(
+    async (action: "send" | "defer" | "save", draftId: string, body?: string) => {
+      try {
+        setError(null);
+        if (action === "save") {
+          await fetch(`${apiUrl}/v1/inbox/drafts/${draftId}`, {
+            method: "PUT",
+            headers: { ...AUTH, "Content-Type": "application/json" },
+            body: JSON.stringify({ body }),
+          });
+          return;
+        }
+        const res = await fetch(`${apiUrl}/v1/inbox/drafts/${draftId}/${action}`, {
+          method: "POST",
+          headers: AUTH,
+        });
+        if (res.status === 403) {
+          setError("Sending is off until you enable it (gmail_scope_tier=send).");
+          return;
+        }
+        await applyScreen(res);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [applyScreen]
+  );
+
+  const onReaction = useCallback(
+    (kind: string, targetId: string, agent?: string) => {
+      // Client-handled actions (SDUI buttons that trigger flows, not just logs).
+      if (kind === "action_tapped" && targetId === "inbox.connect") {
+        setBusy(true);
+        fetch(`${apiUrl}/v1/inbox/connect/stub`, { method: "POST", headers: AUTH })
+          .then((res) => applyScreen(res))
+          .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+          .finally(() => setBusy(false));
+        return;
+      }
+      if (kind === "action_tapped" && targetId === "finance.link") {
+        setBusy(true);
+        fetch(`${apiUrl}/v1/finance/link/sandbox`, { method: "POST", headers: AUTH })
+          .then((res) => applyScreen(res))
+          .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+          .finally(() => setBusy(false));
+        return;
+      }
+      fetch(`${apiUrl}/v1/reactions`, {
+        method: "POST",
+        headers: { ...AUTH, "Content-Type": "application/json" },
+        body: JSON.stringify({ kind, target_id: targetId, agent }),
+      }).catch(() => {});
+    },
+    [applyScreen]
+  );
+
+  const dark = screen?.theme === "dark";
+  if (!fontsLoaded) return null;
   return (
-    <SafeAreaView style={styles.root}>
-      <StatusBar style="auto" />
+    <SafeAreaView style={[styles.root, dark && styles.rootDark]}>
+      <StatusBar style={dark ? "light" : "auto"} />
+      {screenName !== "hub" && (
+        <View style={styles.tabs}>
+          <Pressable
+            style={[styles.tab, dark && styles.tabDark]}
+            onPress={() => setScreenName("hub")}
+          >
+            <Text style={[styles.backText, dark && styles.backTextDark]}>‹  MY HUB</Text>
+          </Pressable>
+        </View>
+      )}
       <ScrollView
         contentContainerStyle={styles.scroll}
         refreshControl={
@@ -146,12 +264,15 @@ export default function App() {
             screen={screen}
             onReaction={onReaction}
             media={{ baseUrl: apiUrl, headers: AUTH }}
+            onDraftAction={onDraftAction}
+            onNavigate={onNavigate}
           />
         ) : (
           <ActivityIndicator style={{ marginTop: 64 }} />
         )}
       </ScrollView>
 
+      {screenName === "home" && (
       <View style={styles.logBar}>
         <TextInput
           style={styles.input}
@@ -166,16 +287,65 @@ export default function App() {
         <Pressable style={styles.logButton} onPress={logMealText} disabled={busy}>
           <Text style={styles.logButtonText}>Log</Text>
         </Pressable>
-        <Pressable style={styles.photoButton} onPress={logMealPhoto} disabled={busy}>
+        <Pressable
+          style={styles.photoButton}
+          onPress={() => uploadPhoto("/v1/nutrition/photo")}
+          disabled={busy}
+        >
           <Text style={styles.logButtonText}>{busy ? "…" : "📷"}</Text>
         </Pressable>
       </View>
+      )}
+      {screenName === "inbox" && (
+        <View style={[styles.logBar, dark && styles.logBarDark]}>
+          <Pressable
+            style={[styles.logButton, dark && styles.logButtonDark, { flex: 1 }]}
+            onPress={syncInbox}
+            disabled={busy}
+          >
+            <Text style={[styles.logButtonText, dark && styles.logButtonTextDark]}>
+              {busy ? "Syncing…" : "↻  Sync inbox"}
+            </Text>
+          </Pressable>
+        </View>
+      )}
+      {screenName === "stylist" && (
+        <View style={styles.logBar}>
+          <Pressable
+            style={[styles.logButton, { flex: 1 }]}
+            onPress={() => uploadPhoto("/v1/wardrobe/photo")}
+            disabled={busy}
+          >
+            <Text style={styles.logButtonText}>{busy ? "…" : "📷  Add garment"}</Text>
+          </Pressable>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#F7F7F5" },
+  rootDark: { backgroundColor: "#08070E" },
+  tabs: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingTop: 8 },
+  tab: { paddingVertical: 6, paddingHorizontal: 14, borderRadius: 16, backgroundColor: "#ECECEA" },
+  tabActive: { backgroundColor: "#1A1A1A" },
+  tabDark: { backgroundColor: "#14101F" },
+  tabActiveDark: { backgroundColor: "#C7B8FF" },
+  tabText: { fontSize: 13, fontWeight: "600", color: "#3B3B3B" },
+  backText: {
+    fontFamily: "JetBrainsMono_400Regular",
+    fontSize: 11,
+    letterSpacing: 1.2,
+    color: "#3B3B3B",
+  },
+  backTextDark: { color: "#C7B8FF" },
+  tabTextActive: { color: "#FFF" },
+  tabTextDark: { color: "#8A87A3" },
+  tabTextActiveDark: { color: "#14101F" },
+  logBarDark: { backgroundColor: "#0B0A14", borderTopColor: "rgba(199,184,255,0.12)" },
+  logButtonDark: { backgroundColor: "#C7B8FF" },
+  logButtonTextDark: { color: "#14101F" },
   scroll: { padding: 16, paddingBottom: 48 },
   error: { color: "#B3261E", marginTop: 48, textAlign: "center" },
   logBar: {

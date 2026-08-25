@@ -17,6 +17,7 @@ services:
 
   api:
     build: ./apps/api
+    env_file: .env
     environment:
       SUPERAPP_DATABASE_URL: postgresql+psycopg2://superapp:superapp@db:5432/superapp
       SUPERAPP_API_TOKEN: ${SUPERAPP_API_TOKEN:-dev-token-change-me}

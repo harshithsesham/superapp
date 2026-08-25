@@ -83,6 +83,71 @@ dev server also `create_all`s for SQLite). Nightly backups:
 `PYTHONPATH=. python scripts/run_golden_nutrition.py` before any prompt/model
 change.
 
+- **Phase 2 (finance vertical)**: implemented. Plaid link (sandbox quick-link +
+  hosted Link for real banks; deterministic stub bank without credentials) →
+  encrypted token vault (Fernet) → `finance_transactions`/`finance_accounts`
+  twins via `/transactions/sync` cursors → deterministic rules engine (budget
+  thresholds, anomaly detection, recurring-charge + income-cadence facts) →
+  weekly LLM insight (batched on cron) → Expo push for urgent alerts.
+  Deferred: Plaid investments, Plaid webhook JWT verification (webhook is gated
+  by a secret path token), native Plaid Link SDK (needs a dev build; Expo Go
+  uses sandbox/hosted link).
+
+- **Phase 4a–c (stylist vertical)**: implemented early, ported from
+  [styleagent](https://github.com/RSM7777/styleagent-backend) onto the substrate.
+  Closet: garment photos → vision attribute extraction → `wardrobe_garments`
+  twin, rendered as an image grid. Daily outfits: morning think (batched on
+  cron) composes 3 looks from owned clothes + weather (open-meteo, keyless;
+  cached as a decaying fact) + style memory. Style memory: like/dislike
+  feedback distills into `user_facts` (styleagent's distillation prompt,
+  restructured for beliefs). New SDUI blocks: `image_grid`, `outfit_card`.
+  Deferred: Gmail purchase-email import (4d — needs Google OAuth credentials),
+  Playwright scraping, virtual try-on, segmentation, onboarding swipes.
+  Outfit cron: `0 7 * * * curl -s -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/v1/agents/stylist/think`
+
+- **Phase 3 (Nano inbox)**: implemented, stub-mailbox mode until Google OAuth
+  credentials land. Best-UX configuration: Opus 5 triages every email with full
+  body + personal context into the Nano tiers (needs_reply / worth_knowing /
+  receipt / cleared); an adversarial verification pass reviews everything headed
+  for auto-clear; replies are drafted immediately ("written and waiting" —
+  Send it / Change it / 6pm). Trust ladder via SUPERAPP_GMAIL_SCOPE_TIER:
+  read (triage only) → send (drafts sendable on tap) → modify (cleared tier
+  actually archived). Pub/Sub webhook (/v1/plaid… pattern) for
+  seconds-after-arrival ingestion; polling cron works without it. Edit-before-
+  send diffs distill into reply-style facts (voice learning). Receipt tier is
+  the Phase 4d hook. Morning brief: `POST /v1/agents/inbox/think` (cron 7am) →
+  one push instead of 41 notifications. Deferred: widgets/lock screen +
+  actionable notifications (need the EAS dev build), Outlook, undo-send window.
+  Sync cron (until Pub/Sub): `*/10 * * * * curl -s -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/v1/inbox/sync`
+
+### Phase 2 exit criterion
+
+A transaction made this morning appears categorized by evening (webhook or the
+sync cron), and the weekly insight is concrete enough not to dismiss.
+
+### Finance endpoints
+
+```
+POST /v1/finance/link/sandbox    sandbox/stub bank link -> first sync -> screen
+POST /v1/finance/link/hosted     hosted Link URL for real banks
+POST /v1/finance/link/exchange   {"public_token": ...} after Link completes
+POST /v1/finance/sync            manual/cron sync + rules run
+POST /v1/finance/budget          {"category": "FOOD_AND_DRINK", "monthly": 300}
+POST /v1/agents/finance/think    weekly insight (cron weekly)
+POST /v1/plaid/webhook/{token}   Plaid-facing (secret path token, no bearer)
+POST /v1/devices/push-token      register Expo push token
+GET  /v1/screen/finance          the finance screen
+```
+
+Sync cron (until Plaid webhooks are wired to a public URL):
+`*/30 8-23 * * * curl -s -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8000/v1/finance/sync`
+
+## Multi-user & deployment
+
+Two-founder shared deployment: see [deploy/DEPLOY.md](deploy/DEPLOY.md) (server)
+and [COFOUNDER_SETUP.md](COFOUNDER_SETUP.md) (phone). Auth is a token->user map
+(SUPERAPP_USER_TOKENS); all data is user-scoped at every layer.
+
 ## Conventions
 
 - Agents are two tiers (`agents/base.py`): `think()` — background cognition, LLM
