@@ -5,6 +5,7 @@ import { InstrumentSerif_400Regular } from "@expo-google-fonts/instrument-serif"
 import { JetBrainsMono_400Regular } from "@expo-google-fonts/jetbrains-mono";
 import * as ImagePicker from "expo-image-picker";
 import * as Notifications from "expo-notifications";
+import * as WebBrowser from "expo-web-browser";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -206,11 +207,28 @@ export default function App() {
     (kind: string, targetId: string, agent?: string) => {
       // Client-handled actions (SDUI buttons that trigger flows, not just logs).
       if (kind === "action_tapped" && targetId === "inbox.connect") {
-        setBusy(true);
-        fetch(`${apiUrl}/v1/inbox/connect/stub`, { method: "POST", headers: AUTH })
-          .then((res) => applyScreen(res))
-          .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-          .finally(() => setBusy(false));
+        (async () => {
+          setBusy(true);
+          try {
+            setError(null);
+            const res = await fetch(`${apiUrl}/v1/gmail/auth-url`, { headers: AUTH });
+            if (res.ok) {
+              // Real Gmail: consent in an in-app browser, bounced back via superapp://
+              const { auth_url } = await res.json();
+              await WebBrowser.openAuthSessionAsync(auth_url, "superapp://gmail-connected");
+              await load();
+            } else {
+              // Server in stub-mailbox mode: demo connect
+              await applyScreen(
+                await fetch(`${apiUrl}/v1/inbox/connect/stub`, { method: "POST", headers: AUTH })
+              );
+            }
+          } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+          } finally {
+            setBusy(false);
+          }
+        })();
         return;
       }
       if (kind === "action_tapped" && targetId === "finance.link") {

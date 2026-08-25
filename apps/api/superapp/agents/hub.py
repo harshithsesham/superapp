@@ -5,7 +5,7 @@ for the rest. No think tier — the Hub owns no cognition, only the view.
 """
 from datetime import datetime, timezone
 
-from ..sdui.blocks import AgentGrid, AgentGridItem, Screen, Section, TextBlock
+from ..sdui.blocks import Action, ActionRow, AgentGrid, AgentGridItem, Screen, Section, TextBlock
 from ..substrate import ContextSlice
 from .base import register_agent
 from .inbox import inbox_hero
@@ -52,6 +52,7 @@ def hub_render(context: ContextSlice) -> Screen:
     else:
         hero_blocks.append(TextBlock(
             text="Connect your inbox to put Nano to work.", variant="body"))
+        hero_blocks.append(ActionRow(actions=[Action(id="inbox.connect", label="Connect inbox")]))
 
     return Screen(title="My Hub", theme="dark", sections=[
         Section(title=None, blocks=hero_blocks),

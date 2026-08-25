@@ -77,7 +77,10 @@ DRAFT_SYSTEM = (
     "notes and past edits. Short, warm, direct; no corporate filler, no "
     "sign-off longer than a first name. Answer the actual question; commit to "
     "specifics when the user's context supports them, otherwise leave a clear "
-    "placeholder like [time]. Output only the reply body."
+    "placeholder like [time]. NEVER invent names, facts, times, or commitments "
+    "not present in the email or the provided context. If you sign at all, "
+    "sign exactly as you_are.name — no other name may appear as the sender. "
+    "Output only the reply body."
 )
 
 DISTILL_STYLE_SYSTEM = (
@@ -162,10 +165,15 @@ def _verify_clear(db: Session, context: ContextSlice, provider: LLMProvider, msg
 
 def _draft_reply(db: Session, context: ContextSlice, provider: LLMProvider, msg) -> str:
     style = _fact(context, "reply_style")
+    # Who the user IS — without this the model invents a signature name.
+    # Overridable via the inbox/signature_name fact; defaults to the user id.
+    identity = _fact(context, "signature_name") or {}
+    name = identity.get("name") or context.user_id.capitalize()
     resp = provider.complete(
         db, user_id=context.user_id, agent="inbox", task="reply_draft",
         system=DRAFT_SYSTEM,
         prompt=json.dumps({
+            "you_are": {"name": name, "email": msg.account_email},
             "email": {"from_name": msg.from_name, "subject": msg.subject, "body": msg.body_text[:6000]},
             "reply_style_notes": (style or {}).get("notes", ""),
             "user_facts": [f for f in context.facts if f["domain"] == "goals"],

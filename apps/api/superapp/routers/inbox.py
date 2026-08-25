@@ -11,6 +11,7 @@ import hmac as hmac_mod
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -78,7 +79,17 @@ def gmail_callback(code: str, state: str = "", db: Session = Depends(get_db)):
     token = client.exchange_code(code)
     email = GmailClient(token).profile()["emailAddress"]
     _connect(db, user_id=user_id, email=email, token=token)
-    return {"ok": True, "connected": email, "note": "Return to the app."}
+    return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<body style='font-family:-apple-system,sans-serif;background:#08070E;color:#F4F2FA;
+display:flex;flex-direction:column;align-items:center;justify-content:center;
+height:100vh;margin:0;gap:12px'>
+<div style='font-size:40px'>&#10003;</div>
+<div style='font-size:20px'>{email} connected</div>
+<div style='color:#8A87A3;font-size:14px'>Returning to Super App&hellip;</div>
+<a href='superapp://gmail-connected' style='color:#C7B8FF'>Open the app</a>
+<script>setTimeout(function() {{ location.href = 'superapp://gmail-connected'; }}, 600);</script>
+</body>""")
 
 
 @router.post("/inbox/sync")

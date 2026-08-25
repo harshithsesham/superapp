@@ -16,6 +16,7 @@
     "extra": {
       "apiUrl": "http://192.168.1.69:8000",
       "apiToken": "dev-token-change-me"
-    }
+    },
+    "scheme": "superapp"
   }
 }
