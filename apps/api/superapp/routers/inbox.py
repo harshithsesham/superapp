@@ -171,6 +171,17 @@ class DeferBody(BaseModel):
     tz_offset_minutes: int = 0
 
 
+@router.post("/inbox/drafts/{draft_id}/now")
+def undefer_draft(draft_id: str, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """'Answer now' on a deferred card — bring the ask back immediately."""
+    draft = get_draft(db, user_id=user_id, draft_id=draft_id)
+    draft.defer_until = None
+    append_event(db, user_id=user_id, type="draft_undeferred", agent="inbox", domain="inbox",
+                 payload={"draft_id": draft.id})
+    db.commit()
+    return render_screen(db, agent="inbox", user_id=user_id).model_dump()
+
+
 @router.post("/inbox/drafts/{draft_id}/defer")
 def defer_draft(draft_id: str, body: DeferBody | None = None,
                 user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):

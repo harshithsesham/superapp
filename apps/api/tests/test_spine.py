@@ -427,15 +427,23 @@ def test_phase3_trust_ladder_and_send_flow():
     assert recent_events(db, user_id="harshith", limit=5, types=["draft_sent"])
     db.close()
 
-    # Defer: "ask me at 6pm" hides the card.
+    # Defer: the card STAYS visible, settled with a label; "now" brings it back.
     screen = client.get("/v1/screen/inbox", headers=AUTH).json()
     needs = next(s for s in screen["sections"] if (s["title"] or "").startswith("Needs your words"))
     remaining = [b for b in needs["blocks"] if b["type"] == "draft_card"]
-    before_count = len(remaining)
     if remaining:
         screen = client.post(f"/v1/inbox/drafts/{remaining[0]['id']}/defer", headers=AUTH).json()
         needs = next(s for s in screen["sections"] if (s["title"] or "").startswith("Needs your words"))
-        assert len([b for b in needs["blocks"] if b["type"] == "draft_card"]) == before_count - 1
+        cards = [b for b in needs["blocks"] if b["type"] == "draft_card"]
+        assert len(cards) == len(remaining)  # nothing vanished
+        deferred = next(c for c in cards if c["id"] == remaining[0]["id"])
+        assert deferred["deferred_label"] == "ASKING AGAIN AT 6PM"
+
+        screen = client.post(f"/v1/inbox/drafts/{remaining[0]['id']}/now", headers=AUTH).json()
+        needs = next(s for s in screen["sections"] if (s["title"] or "").startswith("Needs your words"))
+        undeferred = next(b for b in needs["blocks"]
+                          if b["type"] == "draft_card" and b["id"] == remaining[0]["id"])
+        assert undeferred["deferred_label"] is None  # back to an active ask
 
 
 def test_phase3_morning_brief_and_style_learning():

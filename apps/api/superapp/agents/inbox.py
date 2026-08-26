@@ -277,7 +277,8 @@ def _maybe_distill_style(db: Session, context: ContextSlice, result: ThinkResult
 
 
 def inbox_think(db: Session, *, trigger: dict, context: ContextSlice, run_id: str) -> ThinkResult:
-    if trigger.get("kind") == "email_sync":
+    # Pull-to-refresh means "check my mail" — same as a sync trigger.
+    if trigger.get("kind") in ("email_sync", "user_refresh"):
         return _sync(db, context, trigger)
     result = ThinkResult()
     _maybe_distill_style(db, context, result)
@@ -323,14 +324,15 @@ def inbox_render(context: ContextSlice) -> Screen:
     asks = data.get("needs_reply", [])
     active = [a for a in asks if not (a.get("draft") or {}).get("deferred")]
     ask_blocks: list = []
-    for a in active:
+    for a in asks:  # deferred asks stay visible, settled — they never just vanish
         d = a.get("draft") or {}
         ask_blocks.append(DraftCard(
             id=d.get("id", a["id"]), agent="inbox", from_name=a["from_name"],
             subject=a["subject"], why=a["why_now"] or a["gist"],
             draft=d.get("body", ""), status=d.get("status", "waiting"),
+            deferred_label="ASKING AGAIN AT 6PM" if d.get("deferred") else None,
         ))
-    if not active:
+    if not asks:
         ask_blocks.append(TextBlock(text="Nothing needs your words right now.", variant="caption"))
     sections.append(Section(title=f"Needs your words · {len(active)}", blocks=ask_blocks))
 
@@ -366,4 +368,4 @@ def inbox_render(context: ContextSlice) -> Screen:
     return Screen(title="Inbox Zero", theme="dark", sections=sections)
 
 
-register_agent("inbox", render=inbox_render, think=inbox_think)
+register_agent("inbox", render=inbox_render, think=inbox_think, slow_think=True)

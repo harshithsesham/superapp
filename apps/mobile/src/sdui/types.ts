@@ -119,6 +119,7 @@ export type DraftCard = {
   why: string;
   draft: string;
   status?: "waiting" | "edited" | "sent" | "dismissed";
+  deferred_label?: string | null;
 };
 
 export type Action = {

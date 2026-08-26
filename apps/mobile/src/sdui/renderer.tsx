@@ -12,7 +12,7 @@ type ReactionFn = (kind: string, targetId: string, agent?: string) => void;
 type MediaCtx = { baseUrl: string; headers?: Record<string, string> };
 
 export type DraftActionFn = (
-  action: "send" | "defer" | "save",
+  action: "send" | "defer" | "save" | "now",
   draftId: string,
   body?: string
 ) => void;
@@ -184,8 +184,9 @@ function DraftCardView({
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(block.draft);
+  const deferred = !!block.deferred_label;
   return (
-    <View style={[s.draftCard, dark && dk.card]}>
+    <View style={[s.draftCard, dark && dk.card, deferred && { opacity: 0.62 }]}>
       <View style={s.draftTop}>
         <Text style={[s.draftFrom, dark && dk.ink]}>{block.from_name}</Text>
         {block.why ? (
@@ -193,7 +194,9 @@ function DraftCardView({
         ) : null}
       </View>
       <Text style={[s.draftSubject, dark && dk.caption]}>{block.subject}</Text>
-      <Text style={[s.draftLabel, dark && dk.mono]}>WRITTEN AND WAITING</Text>
+      <Text style={[s.draftLabel, dark && dk.mono, deferred && { color: "#7CF7C4" }]}>
+        {deferred ? block.deferred_label : "WRITTEN AND WAITING"}
+      </Text>
       {editing ? (
         <TextInput
           style={[s.draftEdit, dark && dk.draftEdit]}
@@ -206,7 +209,14 @@ function DraftCardView({
         <Text style={[s.draftBody, dark && dk.draftBody]}>{text}</Text>
       )}
       <View style={s.outfitActions}>
-        {editing ? (
+        {deferred ? (
+          <Pressable
+            style={[s.voteButton, s.voteButtonMuted, dark && dk.voteButtonMuted]}
+            onPress={() => onDraftAction?.("now", block.id)}
+          >
+            <Text style={[s.voteText, s.voteTextMuted, dark && dk.caption]}>Answer now</Text>
+          </Pressable>
+        ) : editing ? (
           <>
             <Pressable
               style={[s.voteButton, dark && dk.voteButton]}

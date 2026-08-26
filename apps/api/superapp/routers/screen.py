@@ -4,7 +4,7 @@ GET /screen/* is a pure read (render tier) — agents' LLM cognition only runs
 through the think tier: POST /screen/*/refresh (user pull) or
 POST /agents/*/think (cron/webhooks).
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -38,12 +38,31 @@ def get_screen(name: str, user_id: str = Depends(current_user_id), db: Session =
     return screen.model_dump()
 
 
+def _background_think(agent: str, user_id: str, trigger: dict) -> None:
+    """Own session: runs after the response has been sent."""
+    from ..db import SessionLocal
+
+    db = SessionLocal()
+    try:
+        run_think(db, agent=agent, user_id=user_id, trigger=trigger)
+    finally:
+        db.close()
+
+
 @router.post("/screen/{name}/refresh")
-def refresh_screen(name: str, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
-    """Pull-to-refresh: run the screen agent's think step, then render fresh."""
+def refresh_screen(name: str, background: BackgroundTasks,
+                   user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """Pull-to-refresh: run the screen agent's think step, then render fresh.
+    Agents with slow cognition (the inbox triaging N emails) respond immediately
+    and keep thinking in the background — the client re-fetches to catch up."""
     agent = _screen_agent(name)
-    if get_agent(agent).think is not None:
-        run_think(db, agent=agent, user_id=user_id, trigger={"kind": "user_refresh", "screen": name})
+    spec = get_agent(agent)
+    trigger = {"kind": "user_refresh", "screen": name}
+    if spec.think is not None:
+        if spec.slow_think:
+            background.add_task(_background_think, agent, user_id, trigger)
+        else:
+            run_think(db, agent=agent, user_id=user_id, trigger=trigger)
     screen = render_screen(db, agent=agent, user_id=user_id)
     append_event(db, user_id=user_id, type="screen_view", agent=agent, payload={"screen": name, "refresh": True})
     db.commit()

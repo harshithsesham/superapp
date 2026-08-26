@@ -58,13 +58,15 @@ class AgentSpec:
     name: str
     render: RenderFn
     think: ThinkFn | None = None  # None = purely reactive agent, renders substrate state
+    slow_think: bool = False  # refresh returns immediately; think continues in background
 
 
 _REGISTRY: dict[str, AgentSpec] = {}
 
 
-def register_agent(name: str, *, render: RenderFn, think: ThinkFn | None = None) -> None:
-    _REGISTRY[name] = AgentSpec(name=name, render=render, think=think)
+def register_agent(name: str, *, render: RenderFn, think: ThinkFn | None = None,
+                   slow_think: bool = False) -> None:
+    _REGISTRY[name] = AgentSpec(name=name, render=render, think=think, slow_think=slow_think)
 
 
 def get_agent(name: str) -> AgentSpec:

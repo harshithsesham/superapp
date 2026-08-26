@@ -141,6 +141,7 @@ class DraftCard(BaseModel):
     why: str  # urgency chip, e.g. "deadline today EOD"
     draft: str
     status: Literal["waiting", "edited", "sent", "dismissed"] = "waiting"
+    deferred_label: str | None = None  # e.g. "ASKING AGAIN AT 6PM" — card stays visible, settled
 
 
 class Action(BaseModel):

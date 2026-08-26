@@ -206,22 +206,8 @@ export default function App() {
     }
   }, []);
 
-  const syncInbox = useCallback(async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      setError(null);
-      await fetch(`${apiUrl}/v1/inbox/sync`, { method: "POST", headers: AUTH });
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, load]);
-
   const onDraftAction = useCallback(
-    async (action: "send" | "defer" | "save", draftId: string, body?: string) => {
+    async (action: "send" | "defer" | "save" | "now", draftId: string, body?: string) => {
       try {
         setError(null);
         if (action === "save") {
@@ -335,9 +321,18 @@ export default function App() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => {
+            tintColor={dark ? "#C7B8FF" : undefined}
+            titleColor={dark ? "#8A87A3" : "#6E6B65"}
+            title={screenName === "inbox" ? "Checking your mail…" : "Refreshing…"}
+            onRefresh={async () => {
               setRefreshing(true);
-              load(true);
+              const wasInbox = screenName === "inbox";
+              await load(true);
+              if (wasInbox) {
+                // Triage continues server-side; quietly pick up what it finds.
+                setTimeout(() => load(), 5000);
+                setTimeout(() => load(), 12000);
+              }
             }}
           />
         }
@@ -380,19 +375,6 @@ export default function App() {
           <Text style={styles.logButtonText}>{busy ? "…" : "📷"}</Text>
         </Pressable>
       </View>
-      )}
-      {screenName === "inbox" && (
-        <View style={[styles.logBar, dark && styles.logBarDark]}>
-          <Pressable
-            style={[styles.logButton, dark && styles.logButtonDark, { flex: 1 }]}
-            onPress={syncInbox}
-            disabled={busy}
-          >
-            <Text style={[styles.logButtonText, dark && styles.logButtonTextDark]}>
-              {busy ? "Syncing…" : "↻  Sync inbox"}
-            </Text>
-          </Pressable>
-        </View>
       )}
       {screenName === "stylist" && (
         <View style={styles.logBar}>

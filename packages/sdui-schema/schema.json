@@ -244,6 +244,18 @@
           ],
           "title": "Status",
           "type": "string"
+        },
+        "deferred_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deferred Label"
         }
       },
       "required": [
