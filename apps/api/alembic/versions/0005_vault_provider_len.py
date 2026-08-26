@@ -14,10 +14,12 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.alter_column("token_vault", "provider", type_=sa.String(64),
-                    existing_type=sa.String(32), existing_nullable=False)
+    with op.batch_alter_table("token_vault") as batch:  # batch: SQLite-compatible
+        batch.alter_column("provider", type_=sa.String(64),
+                           existing_type=sa.String(32), existing_nullable=False)
 
 
 def downgrade() -> None:
-    op.alter_column("token_vault", "provider", type_=sa.String(32),
-                    existing_type=sa.String(64), existing_nullable=False)
+    with op.batch_alter_table("token_vault") as batch:
+        batch.alter_column("provider", type_=sa.String(32),
+                           existing_type=sa.String(64), existing_nullable=False)

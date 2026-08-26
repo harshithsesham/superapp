@@ -249,6 +249,37 @@ class InboxDraft(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class User(Base):
+    """Sign-in identities. user_id is the short stable id every other table keys
+    on; Google's sub is the external anchor. Pre-linking an email to an existing
+    user_id (config: user_email_links) binds historical data to a sign-in."""
+
+    __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint("google_sub", name="uq_user_google_sub"),
+        UniqueConstraint("email", name="uq_user_email"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # the user_id
+    google_sub: Mapped[str | None] = mapped_column(String(64))
+    email: Mapped[str] = mapped_column(String(128), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AuthSession(Base):
+    """Bearer sessions issued after Google sign-in. Only the SHA-256 of the
+    token is stored; revocation = deleting the row."""
+
+    __tablename__ = "auth_sessions"
+    __table_args__ = (Index("ix_sessions_user", "user_id"),)
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class TokenVaultEntry(Base):
     """Encrypted-at-rest OAuth credentials (Plaid, Gmail). Most sensitive table in the app.
 

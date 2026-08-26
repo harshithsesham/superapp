@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/v1/gmail/callback"
+    # Sign-in (openid email profile — identity only, not mail access).
+    google_signin_redirect_uri: str = "http://localhost:8000/v1/auth/google/callback"
+    # Bind emails to pre-existing user_ids: "you@gmail.com:harshith,other@x.com:alex"
+    user_email_links: str = ""
+
     # Trust ladder: read (triage only) -> send (drafts sendable) -> modify
     # (auto-archive the cleared tier for real). Climb it deliberately.
     gmail_scope_tier: str = "read"

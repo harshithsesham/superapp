@@ -38,8 +38,8 @@ gmail as a test user (Audience page).
 
 ```bash
 cd /opt/super-app
-docker compose -f deploy/docker-compose.prod.yml up -d --build
-docker compose -f deploy/docker-compose.prod.yml exec api python -m alembic upgrade head
+docker compose --env-file .env -f deploy/docker-compose.prod.yml up -d --build
+docker compose --env-file .env -f deploy/docker-compose.prod.yml exec api python -m alembic upgrade head
 curl https://app.yourdomain.com/health   # {"ok": true}
 ```
 
@@ -54,7 +54,7 @@ curl https://app.yourdomain.com/health   # {"ok": true}
 */10 * * * * curl -s -X POST -H "Authorization: Bearer $HARSHITH_TOKEN"  https://app.yourdomain.com/v1/inbox/sync
 */10 * * * * curl -s -X POST -H "Authorization: Bearer $COFOUNDER_TOKEN" https://app.yourdomain.com/v1/inbox/sync
 # nightly backup
-0 3 * * *  cd /opt/super-app && docker compose -f deploy/docker-compose.prod.yml exec -T db pg_dump -U superapp superapp | gzip > backups/superapp_$(date +\%F).sql.gz
+0 3 * * *  cd /opt/super-app && docker compose --env-file .env -f deploy/docker-compose.prod.yml exec -T db pg_dump -U superapp superapp | gzip > backups/superapp_$(date +\%F).sql.gz
 ```
 
 ## 5. Trust note (say it out loud)

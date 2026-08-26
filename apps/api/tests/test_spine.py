@@ -521,6 +521,57 @@ def test_oauth_state_is_signed():
     assert r.status_code == 403  # tampered state dies before any Google call
 
 
+# ---------------------------------------------------------------- sign-in
+
+def test_google_signin_sessions():
+    from superapp.auth_sessions import complete_signin
+    import superapp.config as config_module
+
+    settings = config_module.get_settings()
+    settings.user_email_links = "harshithsesham007@gmail.com:harshith"
+    try:
+        db = SessionLocal()
+        # Pre-linked email -> binds to the existing harshith identity + data.
+        user, token = complete_signin(db, google_sub="g-sub-h", 
+                                      email="harshithsesham007@gmail.com", name="Harshith")
+        db.commit()
+        assert user.id == "harshith"
+        r = client.get("/v1/screen/hub", headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 200 and "Inbox Zero" in str(r.json())  # HIS data
+
+        # Unknown email -> auto-provisioned isolated user.
+        user2, token2 = complete_signin(db, google_sub="g-sub-t",
+                                        email="tester.person@gmail.com", name="Tester")
+        db.commit()
+        assert user2.id == "testerperson"
+        hub = client.get("/v1/screen/hub", headers={"Authorization": f"Bearer {token2}"}).json()
+        assert "Connect your inbox" in str(hub)  # empty world
+
+        # Same sub signing in again -> same user, new session.
+        user3, token3 = complete_signin(db, google_sub="g-sub-t",
+                                        email="tester.person@gmail.com", name="Tester")
+        db.commit()
+        assert user3.id == user2.id and token3 != token2
+
+        # Garbage session still rejected; token hash stored, not the token.
+        assert client.get("/v1/screen/hub",
+                          headers={"Authorization": "Bearer not-a-session"}).status_code == 401
+        from superapp.models import AuthSession
+        assert all(len(row.token_hash) == 64 and token2 not in row.token_hash
+                   for row in db.query(AuthSession))
+        db.close()
+    finally:
+        settings.user_email_links = ""
+
+
+def test_signin_start_requires_config():
+    # Stub mode (no google client id): sign-in start refuses cleanly.
+    assert client.get("/v1/auth/google/start", follow_redirects=False).status_code == 400
+    # Forged callback state dies before any Google call.
+    assert client.get("/v1/auth/google/callback",
+                      params={"code": "x", "state": "123.forged"}).status_code == 403
+
+
 def test_reactions_land_in_events():
     r = client.post(
         "/v1/reactions",

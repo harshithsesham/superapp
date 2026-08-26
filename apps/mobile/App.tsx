@@ -5,6 +5,7 @@ import { InstrumentSerif_400Regular } from "@expo-google-fonts/instrument-serif"
 import { JetBrainsMono_400Regular } from "@expo-google-fonts/jetbrains-mono";
 import * as ImagePicker from "expo-image-picker";
 import * as Notifications from "expo-notifications";
+import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useState } from "react";
@@ -12,27 +13,35 @@ import {
   ActivityIndicator,
   Pressable,
   RefreshControl,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { SduiScreen } from "./src/sdui/renderer";
 import { SDUI_VERSION } from "./src/sdui/types";
 import type { Screen } from "./src/sdui/types";
 
-const { apiUrl, apiToken } = (Constants.expoConfig?.extra ?? {}) as {
-  apiUrl: string;
-  apiToken: string;
-};
-const AUTH = { Authorization: `Bearer ${apiToken}` };
+const extra = (Constants.expoConfig?.extra ?? {}) as { apiUrl?: string; apiToken?: string };
+// Live module bindings: session bootstrap / sign-in reassign these, and every
+// callback reads them at call time.
+let apiUrl = extra.apiUrl ?? "";
+let AUTH: { Authorization: string } = { Authorization: `Bearer ${extra.apiToken ?? ""}` };
+
+type StoredSession = { url: string; token: string; user?: string; name?: string };
+
+function applySession(sess: StoredSession) {
+  apiUrl = sess.url;
+  AUTH = { Authorization: `Bearer ${sess.token}` };
+}
 
 const SCREENS = ["hub", "inbox", "home", "finance", "stylist"] as const;
 type ScreenName = (typeof SCREENS)[number];
 
 export default function App() {
+  const [authState, setAuthState] = useState<"loading" | "signin" | "ready">("loading");
   const [screenName, setScreenName] = useState<ScreenName>("hub");
   const [screen, setScreen] = useState<Screen | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -78,10 +87,26 @@ export default function App() {
     [applyScreen, screenName]
   );
 
+  // Session bootstrap: stored sign-in > build-time dev token > sign-in screen.
   useEffect(() => {
+    (async () => {
+      try {
+        const raw = await SecureStore.getItemAsync("session");
+        if (raw) {
+          applySession(JSON.parse(raw) as StoredSession);
+          setAuthState("ready");
+          return;
+        }
+      } catch {}
+      setAuthState(extra.apiToken ? "ready" : "signin");
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (authState !== "ready") return;
     setScreen(null);
     load();
-  }, [load]);
+  }, [load, authState]);
 
   // Push registration — best-effort: in Expo Go without an EAS projectId this
   // throws, and we silently stay push-less.
@@ -249,9 +274,21 @@ export default function App() {
   );
 
   const dark = screen?.theme === "dark";
-  if (!fontsLoaded) return null;
+  if (!fontsLoaded || authState === "loading") return null;
+  if (authState === "signin") {
+    return (
+      <SignInScreen
+        defaultUrl={extra.apiUrl ?? ""}
+        onSignedIn={(sess) => {
+          applySession(sess);
+          setAuthState("ready");
+        }}
+      />
+    );
+  }
   return (
-    <SafeAreaView style={[styles.root, dark && styles.rootDark]}>
+    <SafeAreaProvider>
+    <SafeAreaView style={[styles.root, dark && styles.rootDark]} edges={["top", "left", "right"]}>
       <StatusBar style={dark ? "light" : "auto"} />
       {screenName !== "hub" && (
         <View style={styles.tabs}>
@@ -339,8 +376,138 @@ export default function App() {
         </View>
       )}
     </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
+
+function SignInScreen({
+  defaultUrl,
+  onSignedIn,
+}: {
+  defaultUrl: string;
+  onSignedIn: (sess: StoredSession) => void;
+}) {
+  const [url, setUrl] = useState(defaultUrl);
+  const [showUrl, setShowUrl] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const signIn = useCallback(async () => {
+    const server = url.trim().replace(/\/$/, "");
+    if (!server || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await WebBrowser.openAuthSessionAsync(
+        `${server}/v1/auth/google/start`,
+        "superapp://signed-in"
+      );
+      if (res.type !== "success" || !res.url) {
+        if (res.type === "cancel" || res.type === "dismiss") return;
+        throw new Error("Sign-in did not complete");
+      }
+      const params: Record<string, string> = {};
+      for (const pair of (res.url.split("?")[1] ?? "").split("&")) {
+        const [k, v] = pair.split("=");
+        if (k) params[k] = decodeURIComponent(v ?? "");
+      }
+      if (!params.token) throw new Error("No session returned");
+      const sess: StoredSession = {
+        url: server,
+        token: params.token,
+        user: params.user,
+        name: params.name,
+      };
+      await SecureStore.setItemAsync("session", JSON.stringify(sess));
+      onSignedIn(sess);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [url, busy, onSignedIn]);
+
+  return (
+    <SafeAreaProvider>
+      <SafeAreaView style={si.root}>
+        <View style={si.body}>
+          <Text style={si.kicker}>YOUR CHIEF OF STAFF</Text>
+          <Text style={si.title}>I run the boring{"\n"}half of your life.</Text>
+          <Text style={si.sub}>
+            One agent per vertical — inbox, meals, money, wardrobe — on one shared memory.
+          </Text>
+          {error ? <Text style={si.error}>{error}</Text> : null}
+          <Pressable style={si.googleBtn} onPress={signIn} disabled={busy}>
+            <Text style={si.googleText}>{busy ? "Signing in…" : "Continue with Google"}</Text>
+          </Pressable>
+          <Pressable onPress={() => setShowUrl((v) => !v)}>
+            <Text style={si.advanced}>{showUrl ? "Hide server" : "Choose server"}</Text>
+          </Pressable>
+          {showUrl ? (
+            <TextInput
+              style={si.urlInput}
+              value={url}
+              onChangeText={setUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="https://app.example.com"
+              placeholderTextColor="#55524C"
+            />
+          ) : null}
+        </View>
+      </SafeAreaView>
+    </SafeAreaProvider>
+  );
+}
+
+const si = StyleSheet.create({
+  root: { flex: 1, backgroundColor: "#08070E" },
+  body: { flex: 1, justifyContent: "center", padding: 28, gap: 14 },
+  kicker: {
+    fontFamily: "JetBrainsMono_400Regular",
+    fontSize: 11,
+    letterSpacing: 2,
+    color: "#8A87A3",
+  },
+  title: {
+    fontFamily: "InstrumentSerif_400Regular",
+    fontSize: 40,
+    lineHeight: 46,
+    color: "#F4F2FA",
+  },
+  sub: {
+    fontFamily: "InstrumentSans_400Regular",
+    fontSize: 15,
+    lineHeight: 22,
+    color: "#B9B4CC",
+    marginBottom: 14,
+  },
+  error: { color: "#FF9DA8", fontSize: 13 },
+  googleBtn: {
+    backgroundColor: "#F4F2FA",
+    borderRadius: 14,
+    paddingVertical: 15,
+    alignItems: "center",
+  },
+  googleText: { fontFamily: "InstrumentSans_600SemiBold", fontSize: 16, color: "#14101F" },
+  advanced: {
+    fontFamily: "JetBrainsMono_400Regular",
+    fontSize: 11,
+    letterSpacing: 1,
+    color: "#8A87A3",
+    textAlign: "center",
+    marginTop: 6,
+  },
+  urlInput: {
+    borderWidth: 1,
+    borderColor: "rgba(199,184,255,0.25)",
+    borderRadius: 12,
+    padding: 12,
+    color: "#F4F2FA",
+    fontSize: 14,
+    fontFamily: "JetBrainsMono_400Regular",
+  },
+});
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#F7F7F5" },

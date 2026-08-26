@@ -14,8 +14,7 @@
       "package": "com.harshith.superapp"
     },
     "extra": {
-      "apiUrl": "http://192.168.1.69:8000",
-      "apiToken": "dev-token-change-me"
+      "apiUrl": "https://app.3.17.83.242.sslip.io"
     },
     "scheme": "superapp"
   }

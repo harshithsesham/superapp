@@ -1,13 +1,15 @@
-"""Bearer auth with a token -> user map. The multi-tenant swap point
-(architecture §8): sign-in providers replace this module later; nothing below
-it ever assumed one user.
+"""Bearer auth: static token map (founders, crons, dev) + Google sign-in
+sessions. The multi-tenant story lives here and in auth_sessions.py.
 """
 import hmac
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.orm import Session
 
+from .auth_sessions import resolve_session
 from .config import get_settings
+from .db import get_db
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -25,9 +27,16 @@ def token_map() -> dict[str, str]:
     return m
 
 
-def current_user_id(creds: HTTPAuthorizationCredentials | None = Depends(_bearer)) -> str:
+def current_user_id(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> str:
     if creds is not None:
         for token, user_id in token_map().items():
             if hmac.compare_digest(creds.credentials, token):
                 return user_id
+        session_user = resolve_session(db, creds.credentials)
+        if session_user is not None:
+            db.commit()  # persist last_used touch
+            return session_user
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
