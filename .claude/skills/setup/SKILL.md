@@ -77,9 +77,14 @@ set -a && . ../../.env && set +a && npx expo run:ios
 - Verify: attach the simulator panel if available, screenshot, expect the
   "My Hub" screen (dark, serif title).
 
-## Phase 4 — connect their Gmail (read-only)
+## Phase 4 — sign in + connect Gmail
 
-Preferred: in the app, on My Hub, the USER taps **Connect inbox** — an in-app
+Sign-in: on first launch the app shows a sign-in screen — the USER taps
+**Continue with Google** (their identity; creates their account automatically).
+Against a local stub server without Google credentials, the app falls back to
+the token flow — set the env token before `expo run:ios` in that case.
+
+Gmail connect: in the app, on My Hub, the USER taps **Connect inbox** — an in-app
 browser opens Google consent, and approval bounces them straight back into the
 app. The "Google hasn't verified this app" warning is expected — Continue.
 The consent grant is theirs to tap, never yours.

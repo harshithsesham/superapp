@@ -180,6 +180,17 @@ export default function App() {
     }
   }, [busy, applyScreen]);
 
+  const signOut = useCallback(async () => {
+    try {
+      await SecureStore.deleteItemAsync("session");
+    } catch {}
+    apiUrl = extra.apiUrl ?? "";
+    AUTH = { Authorization: "Bearer " };
+    setScreen(null);
+    setScreenName("hub");
+    setAuthState("signin");
+  }, []);
+
   const onNavigate = useCallback((screen: string) => {
     if ((SCREENS as readonly string[]).includes(screen)) {
       setScreenName(screen as ScreenName);
@@ -290,13 +301,19 @@ export default function App() {
     <SafeAreaProvider>
     <SafeAreaView style={[styles.root, dark && styles.rootDark]} edges={["top", "left", "right"]}>
       <StatusBar style={dark ? "light" : "auto"} />
-      {screenName !== "hub" && (
+      {screenName !== "hub" ? (
         <View style={styles.tabs}>
           <Pressable
             style={[styles.tab, dark && styles.tabDark]}
             onPress={() => setScreenName("hub")}
           >
             <Text style={[styles.backText, dark && styles.backTextDark]}>‹  MY HUB</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={[styles.tabs, { justifyContent: "flex-end" }]}>
+          <Pressable style={[styles.tab, dark && styles.tabDark]} onPress={signOut}>
+            <Text style={[styles.backText, dark && styles.backTextDark]}>SIGN OUT</Text>
           </Pressable>
         </View>
       )}
