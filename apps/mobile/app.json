@@ -11,7 +11,8 @@
       "bundleIdentifier": "com.harshith.superapp",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "appleTeamId": "JAUSPN67UY"
     },
     "android": {
       "package": "com.harshith.superapp"
