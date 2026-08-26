@@ -242,10 +242,10 @@ function DraftCardView({
               <Text style={[s.voteText, s.voteTextMuted, dark && dk.caption]}>Change it</Text>
             </Pressable>
             <Pressable
-              style={[s.voteButton, s.voteButtonMuted, dark && dk.voteButtonMuted, { flex: 0.6 }]}
+              style={[s.voteButton, s.voteButtonMuted, dark && dk.voteButtonMuted]}
               onPress={() => onDraftAction?.("defer", block.id)}
             >
-              <Text style={[s.voteText, s.voteTextMuted, dark && dk.caption]}>6pm</Text>
+              <Text style={[s.voteText, s.voteTextMuted, dark && dk.caption]}>Ask at 6pm</Text>
             </Pressable>
           </>
         )}

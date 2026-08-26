@@ -225,7 +225,11 @@ export default function App() {
         }
         const res = await fetch(`${apiUrl}/v1/inbox/drafts/${draftId}/${action}`, {
           method: "POST",
-          headers: AUTH,
+          headers: { ...AUTH, "Content-Type": "application/json" },
+          body:
+            action === "defer"
+              ? JSON.stringify({ tz_offset_minutes: new Date().getTimezoneOffset() })
+              : undefined,
         });
         if (res.status === 403) {
           setError("Sending is off until you enable it (gmail_scope_tier=send).");

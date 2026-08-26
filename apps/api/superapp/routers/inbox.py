@@ -166,15 +166,24 @@ def send_draft(draft_id: str, user_id: str = Depends(current_user_id), db: Sessi
     return render_screen(db, agent="inbox", user_id=user_id).model_dump()
 
 
+class DeferBody(BaseModel):
+    # Minutes to ADD to local time to get UTC (JS getTimezoneOffset convention).
+    tz_offset_minutes: int = 0
+
+
 @router.post("/inbox/drafts/{draft_id}/defer")
-def defer_draft(draft_id: str, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
-    """'Ask me at 6pm' — hides the ask until 18:00 today (UTC for now)."""
+def defer_draft(draft_id: str, body: DeferBody | None = None,
+                user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """'Ask me at 6pm' — hides the ask until 18:00 in the USER'S timezone."""
     from datetime import datetime, time, timedelta, timezone
 
     draft = get_draft(db, user_id=user_id, draft_id=draft_id)
-    now = datetime.now(timezone.utc)
-    six_pm = datetime.combine(now.date(), time(18, 0), tzinfo=timezone.utc)
-    draft.defer_until = six_pm if six_pm > now else six_pm + timedelta(days=1)
+    offset = timedelta(minutes=(body.tz_offset_minutes if body else 0))
+    now_local = datetime.now(timezone.utc) - offset
+    six_pm_local = datetime.combine(now_local.date(), time(18, 0))
+    if six_pm_local <= now_local.replace(tzinfo=None):
+        six_pm_local += timedelta(days=1)
+    draft.defer_until = six_pm_local.replace(tzinfo=timezone.utc) + offset
     append_event(db, user_id=user_id, type="draft_deferred", agent="inbox", domain="inbox",
                  payload={"draft_id": draft.id})
     db.commit()
