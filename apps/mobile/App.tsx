@@ -8,7 +8,7 @@ import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 import { StatusBar } from "expo-status-bar";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -44,6 +44,10 @@ export default function App() {
   const [authState, setAuthState] = useState<"loading" | "signin" | "ready">("loading");
   const [screenName, setScreenName] = useState<ScreenName>("hub");
   const [screen, setScreen] = useState<Screen | null>(null);
+  const screenNameRef = useRef<ScreenName>("hub");
+  screenNameRef.current = screenName;
+  const screenCache = useRef<Partial<Record<ScreenName, Screen>>>({});
+  const [lastTheme, setLastTheme] = useState<"light" | "dark">("dark");
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -63,6 +67,8 @@ export default function App() {
         `This server speaks SDUI v${data.version}; the app supports v${SDUI_VERSION}. Update the app.`
       );
     }
+    screenCache.current[screenNameRef.current] = data;
+    setLastTheme(data.theme === "dark" ? "dark" : "light");
     setScreen(data);
   }, []);
 
@@ -104,9 +110,12 @@ export default function App() {
 
   useEffect(() => {
     if (authState !== "ready") return;
-    setScreen(null);
+    // Show the cached screen instantly (no flash), refresh silently behind it.
+    const cached = screenCache.current[screenName] ?? null;
+    setScreen(cached);
+    if (cached) setLastTheme(cached.theme === "dark" ? "dark" : "light");
     load();
-  }, [load, authState]);
+  }, [load, authState, screenName]);
 
   // Push registration — best-effort: in Expo Go without an EAS projectId this
   // throws, and we silently stay push-less.
@@ -288,7 +297,7 @@ export default function App() {
     [applyScreen]
   );
 
-  const dark = screen?.theme === "dark";
+  const dark = (screen?.theme ?? lastTheme) === "dark";
   if (!fontsLoaded || authState === "loading") return null;
   if (authState === "signin") {
     return (
