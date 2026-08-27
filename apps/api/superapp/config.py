@@ -66,6 +66,11 @@ class Settings(BaseSettings):
     # Pub/Sub topic for Gmail watch, e.g. projects/<proj>/topics/gmail-push. Empty = polling only.
     gmail_pubsub_topic: str = ""
 
+    # Nano's voice (the interview, later the briefs). Empty key = silent stub.
+    elevenlabs_api_key: str = ""
+    nano_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"  # "George" — warm storyteller
+    elevenlabs_model: str = "eleven_multilingual_v2"
+
     # Token vault encryption key (Fernet, urlsafe base64). Empty = derived from
     # api_token — fine for single-user dev, set explicitly in prod.
     vault_key: str = ""

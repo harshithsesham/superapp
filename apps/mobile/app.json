@@ -20,6 +20,15 @@
     "extra": {
       "apiUrl": "https://app.nutrishiksha.com"
     },
-    "scheme": "superapp"
+    "scheme": "superapp",
+    "plugins": [
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Nano listens while you answer its interview questions.",
+          "speechRecognitionPermission": "Your spoken answers are transcribed on this device."
+        }
+      ]
+    ]
   }
 }

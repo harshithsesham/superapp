@@ -580,6 +580,47 @@ def test_signin_start_requires_config():
                       params={"code": "x", "state": "123.forged"}).status_code == 403
 
 
+# ---------------------------------------------------------------- interview
+
+def test_identity_interview_flow():
+    r = client.post("/v1/interview/start", headers=AUTH).json()
+    assert "I'm Nano" in r["question"] and r["session_id"]
+    sid = r["session_id"]
+
+    # Stub mode walks the sections deterministically; answer through them all.
+    answers = ["I'm Harshith, I build things.", "Mornings are coffee and code.",
+               "Mostly my cofounder Rohith and my mom.", "Frugal except tools.",
+               "Short and direct, lowercase.", "Never compromise on shipping.",
+               "Run my inbox."]
+    done, hops = False, 0
+    for text in answers * 2:
+        r = client.post(f"/v1/interview/{sid}/answer", headers=AUTH, json={"text": text}).json()
+        hops += 1
+        if r["done"]:
+            done = True
+            break
+    assert done and hops <= 10
+    assert "thank you" in r["question"].lower() or "yours" in r["question"].lower()
+
+    # Transcript stored verbatim; identity facts distilled and visible to agents.
+    db = SessionLocal()
+    from superapp.models import InterviewTurn
+    texts = [t.text for t in db.query(InterviewTurn).all()]
+    assert "I'm Harshith, I build things." in texts
+    from superapp.substrate import read_facts
+    keys = {f.key for f in read_facts(db, user_id="harshith", domains=["identity"], limit=20)}
+    assert {"identity", "communication_style", "decision_rules"} <= keys
+    inbox_slice = get_context(db, agent="inbox", user_id="harshith")
+    assert any(f["domain"] == "identity" for f in inbox_slice.facts)
+    db.close()
+
+    # Completed session refuses more answers; audio endpoint stubs to 204.
+    assert client.post(f"/v1/interview/{sid}/answer", headers=AUTH,
+                       json={"text": "more"}).status_code == 409
+    turn_audio_url = r["audio_url"]
+    assert client.get(turn_audio_url, headers=AUTH).status_code == 204
+
+
 def test_reactions_land_in_events():
     r = client.post(
         "/v1/reactions",

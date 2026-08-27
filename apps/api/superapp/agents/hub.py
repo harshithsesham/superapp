@@ -45,8 +45,13 @@ def hub_render(context: ContextSlice) -> Screen:
         ),
     ])
 
+    has_identity = any(f["domain"] == "identity" for f in context.facts)
     inbox_connected = data.get("inbox", {}).get("connected", False)
     hero_blocks = [TextBlock(text=stamp, variant="caption")]
+    if not has_identity:
+        hero_blocks.append(ActionRow(actions=[
+            Action(id="interview.start", label="Meet Nano — 20 minutes that change everything")
+        ]))
     if inbox_connected:
         hero_blocks.append(inbox_hero(data.get("inbox", {}), screen="inbox"))
     else:

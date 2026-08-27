@@ -18,10 +18,10 @@ AGENT_SCOPES: dict[str, list[str] | None] = {
     "demo": None,  # None = wildcard
     "hub": None,  # the home screen: render-only, sees everything
     "orchestrator": None,
-    "nutrition": ["nutrition", "goals", "health"],
-    "finance": ["finance", "goals"],
-    "inbox": ["inbox", "goals"],
-    "stylist": ["wardrobe", "goals", "nutrition", "finance"],
+    "nutrition": ["nutrition", "goals", "health", "identity"],
+    "finance": ["finance", "goals", "identity"],
+    "inbox": ["inbox", "goals", "identity"],
+    "stylist": ["wardrobe", "goals", "nutrition", "finance", "identity"],
 }
 
 # Domain twin loaders: extra per-domain data included in the slice when the

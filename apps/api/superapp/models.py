@@ -280,6 +280,32 @@ class AuthSession(Base):
     last_used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class InterviewSession(Base):
+    """The identity-seed interview (north star §2). The transcript is a
+    first-class asset, stored verbatim forever — never summarized away."""
+
+    __tablename__ = "interview_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="active")  # active | completed
+    section: Mapped[str] = mapped_column(String(32), default="opening")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class InterviewTurn(Base):
+    __tablename__ = "interview_turns"
+    __table_args__ = (Index("ix_iturns_session", "session_id", "idx"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    session_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    idx: Mapped[int] = mapped_column(nullable=False)
+    role: Mapped[str] = mapped_column(String(8), nullable=False)  # nano | user
+    text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class TokenVaultEntry(Base):
     """Encrypted-at-rest OAuth credentials (Plaid, Gmail). Most sensitive table in the app.
 

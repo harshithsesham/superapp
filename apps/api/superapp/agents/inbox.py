@@ -176,7 +176,7 @@ def _draft_reply(db: Session, context: ContextSlice, provider: LLMProvider, msg)
             "you_are": {"name": name, "email": msg.account_email},
             "email": {"from_name": msg.from_name, "subject": msg.subject, "body": msg.body_text[:6000]},
             "reply_style_notes": (style or {}).get("notes", ""),
-            "user_facts": [f for f in context.facts if f["domain"] == "goals"],
+            "user_facts": [f for f in context.facts if f["domain"] in ("goals", "identity")],
         }, sort_keys=True),
     )
     if resp.stubbed or resp.refused:

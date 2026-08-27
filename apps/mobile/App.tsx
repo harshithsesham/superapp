@@ -20,6 +20,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { InterviewScreen } from "./src/InterviewScreen";
 import { SduiScreen } from "./src/sdui/renderer";
 import { SDUI_VERSION } from "./src/sdui/types";
 import type { Screen } from "./src/sdui/types";
@@ -42,6 +43,7 @@ type ScreenName = (typeof SCREENS)[number];
 
 export default function App() {
   const [authState, setAuthState] = useState<"loading" | "signin" | "ready">("loading");
+  const [interviewing, setInterviewing] = useState(false);
   const [screenName, setScreenName] = useState<ScreenName>("hub");
   const [screen, setScreen] = useState<Screen | null>(null);
   const screenNameRef = useRef<ScreenName>("hub");
@@ -241,6 +243,10 @@ export default function App() {
   const onReaction = useCallback(
     (kind: string, targetId: string, agent?: string) => {
       // Client-handled actions (SDUI buttons that trigger flows, not just logs).
+      if (kind === "action_tapped" && targetId === "interview.start") {
+        setInterviewing(true);
+        return;
+      }
       if (kind === "action_tapped" && targetId === "inbox.connect") {
         (async () => {
           setBusy(true);
@@ -285,6 +291,19 @@ export default function App() {
 
   const dark = (screen?.theme ?? lastTheme) === "dark";
   if (!fontsLoaded || authState === "loading") return null;
+  if (interviewing) {
+    return (
+      <InterviewScreen
+        apiUrl={apiUrl}
+        auth={AUTH}
+        onDone={() => {
+          setInterviewing(false);
+          setScreen(null);
+          load();
+        }}
+      />
+    );
+  }
   if (authState === "signin") {
     return (
       <SignInScreen
