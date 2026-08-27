@@ -74,10 +74,16 @@ DISTILL_SCHEMA = {
 }
 
 OPENER = (
-    "Hi — I'm Nano. Before I start running the boring half of your life, I want "
-    "to actually know you. This is just a conversation — say as much or as "
-    "little as you like, and we can stop anytime. So, to start: tell me about "
+    "Hi — I'm Nano. Before I start running the boring half of your life, I'd "
+    "like to actually know you. This is just me getting to know you — no wrong "
+    "answers, no test. All together it takes about thirty minutes, but you "
+    "don't have to do it in one sitting: stop whenever you like and I'll pick "
+    "up right where we left off. So, whenever you're ready — tell me about "
     "yourself. Who are you, and what does your life look like right now?"
+)
+
+WELCOME_BACK = (
+    "Welcome back — no rush, we'll just pick up where we left off. "
 )
 
 STUB_QUESTIONS = {
@@ -106,20 +112,29 @@ def _add_turn(db: Session, session: InterviewSession, role: str, text: str) -> I
     return turn
 
 
-def start(db: Session, user_id: str) -> tuple[InterviewSession, str]:
-    """Resume the active session or start fresh; returns (session, question)."""
+def start(db: Session, user_id: str) -> tuple[InterviewSession, str, bool]:
+    """Resume the active session or start fresh.
+    Returns (session, question, resumed). On resume, Nano re-asks its last
+    question with a welcome-back framing (stored as a fresh turn so the voice
+    audio matches the words)."""
     session = db.scalar(select(InterviewSession).where(
         InterviewSession.user_id == user_id, InterviewSession.status == "active"))
     if session is not None:
         last_nano = db.scalar(select(InterviewTurn).where(
             InterviewTurn.session_id == session.id, InterviewTurn.role == "nano")
             .order_by(InterviewTurn.idx.desc()))
-        return session, (last_nano.text if last_nano else OPENER)
+        has_answers = db.scalar(select(InterviewTurn.id).where(
+            InterviewTurn.session_id == session.id, InterviewTurn.role == "user"))
+        if last_nano and has_answers:
+            text = WELCOME_BACK + last_nano.text
+            _add_turn(db, session, "nano", text)
+            return session, text, True
+        return session, (last_nano.text if last_nano else OPENER), False
     session = InterviewSession(user_id=user_id)
     db.add(session)
     db.flush()
     _add_turn(db, session, "nano", OPENER)
-    return session, OPENER
+    return session, OPENER, False
 
 
 def answer(db: Session, session: InterviewSession, user_text: str) -> tuple[str, bool, float]:

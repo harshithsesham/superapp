@@ -33,9 +33,11 @@ def _turn_payload(db: Session, session: InterviewSession, text: str,
 
 @router.post("/start")
 def start_interview(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
-    session, question = interview.start(db, user_id)
+    session, question, resumed = interview.start(db, user_id)
     db.commit()
-    return _turn_payload(db, session, question)
+    payload = _turn_payload(db, session, question)
+    payload["resumed"] = resumed
+    return payload
 
 
 class Answer(BaseModel):
