@@ -1,3 +1,3 @@
-{$SUPERAPP_DOMAIN} {
+{$SUPERAPP_DOMAIN}, app.3.17.83.242.sslip.io {
 	reverse_proxy api:8000
 }
