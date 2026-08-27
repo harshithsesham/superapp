@@ -66,6 +66,10 @@ def inbox_context(db: Session, user_id: str) -> dict:
     def aware(dt):
         return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
+    from_counts: dict[str, int] = {}
+    for m in msgs:
+        from_counts[m.from_addr] = from_counts.get(m.from_addr, 0) + 1
+
     def row(m: InboxMessage) -> dict:
         d = drafts.get(m.id)
         deferred = bool(d and d.defer_until and aware(d.defer_until) > now)
@@ -74,6 +78,7 @@ def inbox_context(db: Session, user_id: str) -> dict:
             "subject": m.subject, "gist": m.gist, "why_now": m.why_now,
             "clear_reason": m.clear_reason, "tier": m.tier, "settled": m.settled,
             "received_at": aware(m.received_at).isoformat(),
+            "prior_from_sender": from_counts.get(m.from_addr, 1) - 1,
             "draft": {"id": d.id, "body": d.body, "status": d.status, "deferred": deferred} if d else None,
         }
 

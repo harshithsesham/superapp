@@ -256,6 +256,18 @@
           ],
           "default": null,
           "title": "Deferred Label"
+        },
+        "why_detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Why Detail"
         }
       },
       "required": [
@@ -627,7 +639,8 @@
                 "list": "#/$defs/ListBlock",
                 "outfit_card": "#/$defs/OutfitCard",
                 "stat_row": "#/$defs/StatRow",
-                "text": "#/$defs/TextBlock"
+                "text": "#/$defs/TextBlock",
+                "timeline": "#/$defs/Timeline"
               },
               "propertyName": "type"
             },
@@ -661,6 +674,9 @@
               },
               {
                 "$ref": "#/$defs/DraftCard"
+              },
+              {
+                "$ref": "#/$defs/Timeline"
               },
               {
                 "$ref": "#/$defs/ActionRow"
@@ -771,6 +787,74 @@
         "text"
       ],
       "title": "TextBlock",
+      "type": "object"
+    },
+    "Timeline": {
+      "description": "The signal-fate ledger (Nano V4): every signal ends in a verdict.",
+      "properties": {
+        "type": {
+          "const": "timeline",
+          "default": "timeline",
+          "title": "Type",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/TimelineItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "footer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Footer"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "Timeline",
+      "type": "object"
+    },
+    "TimelineItem": {
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "verdict": {
+          "title": "Verdict",
+          "type": "string"
+        },
+        "tone": {
+          "default": "filed",
+          "enum": [
+            "ask",
+            "did",
+            "filed"
+          ],
+          "title": "Tone",
+          "type": "string"
+        },
+        "at": {
+          "title": "At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "verdict",
+        "at"
+      ],
+      "title": "TimelineItem",
       "type": "object"
     }
   },

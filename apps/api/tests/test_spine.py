@@ -478,12 +478,57 @@ def test_gmail_webhook_gated():
 
 def test_hub_screen_projects_all_verticals():
     screen = client.get("/v1/screen/hub", headers=AUTH).json()
-    assert screen["title"] == "My Hub" and screen["theme"] == "dark"
-    hero = next(b for sec in screen["sections"] for b in sec["blocks"] if b["type"] == "agent_card")
-    assert hero["name"] == "Inbox Zero" and hero["screen"] == "inbox"
+    # V4: the title is a greeting, not a label.
+    assert screen["title"].startswith("Good ") and screen["title"].endswith(".")
+    assert screen["theme"] == "dark"
+    cards = [b for sec in screen["sections"] for b in sec["blocks"] if b["type"] == "agent_card"]
+    brief = next(c for c in cards if c["id"] == "morning-brief")
+    assert "done" in brief["headline"]  # "Two things done. One question."
+    assert {s["label"] for s in brief["stats"]} == {"done without you", "need your yes", "signals read"}
+    hero = next(c for c in cards if c["name"] == "Inbox Zero")
+    assert hero["screen"] == "inbox"
     grid = next(b for sec in screen["sections"] for b in sec["blocks"] if b["type"] == "agent_grid")
     assert {i["screen"] for i in grid["items"]} == {"home", "finance", "stylist"}
     assert any("kcal" in i["sub"] or "logged" in i["sub"] for i in grid["items"])
+
+
+def test_hub_timeline_every_signal_ends_in_a_verdict():
+    screen = client.get("/v1/screen/hub", headers=AUTH).json()
+    timeline = next(b for sec in screen["sections"] for b in sec["blocks"] if b["type"] == "timeline")
+    assert timeline["items"], "today's mail should appear as fate lines"
+    assert all(i["verdict"] for i in timeline["items"])
+    assert any(i["tone"] == "filed" for i in timeline["items"])
+    assert "signal" in timeline["footer"]
+
+
+def test_decision_ledger_and_autonomy_panel():
+    # The send-flow tests above left typed verdicts behind: an edited send and
+    # a defer from the user, plus nano's own archive/flag verdicts from triage.
+    autonomy = client.get("/v1/kernel/autonomy", headers=AUTH).json()
+    caps = {c["action_key"]: c for c in autonomy["capabilities"]}
+    send = caps["inbox.send_reply"]
+    assert send["edited"] == 1 and send["level"] == 2 and not send["promotable"]
+    assert caps["inbox.archive_noise"]["acted"] >= 1  # nano's side is counted too
+
+    # Promotion cannot be taken, only earned: 409 until the record qualifies.
+    r = client.post("/v1/kernel/promote", headers=AUTH,
+                    json={"action_key": "inbox.send_reply"})
+    assert r.status_code == 409 and "earned" in r.json()["detail"]
+
+    # The Hub shows the panel with honest counts.
+    hub = client.get("/v1/screen/hub", headers=AUTH).json()
+    panel = next(sec for sec in hub["sections"]
+                 if (sec["title"] or "").startswith("Without asking"))
+    assert "earned, not configured" in panel["title"]
+    rows = next(b for b in panel["blocks"] if b["type"] == "list")["items"]
+    assert any(r["id"] == "inbox.archive_noise" for r in rows)
+
+
+def test_draft_card_explains_why_it_wrote_this():
+    screen = client.get("/v1/screen/inbox", headers=AUTH).json()
+    card = next(b for sec in screen["sections"] for b in sec["blocks"]
+                if b["type"] == "draft_card")
+    assert card["why_detail"] and "nothing sends until you say so" in card["why_detail"].lower()
 
 
 # ---------------------------------------------------------------- multi-user

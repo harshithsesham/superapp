@@ -184,6 +184,7 @@ function DraftCardView({
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(block.draft);
+  const [showWhy, setShowWhy] = useState(false);
   const deferred = !!block.deferred_label;
   return (
     <View style={[s.draftCard, dark && dk.card, deferred && { opacity: 0.62 }]}>
@@ -208,6 +209,18 @@ function DraftCardView({
       ) : (
         <Text style={[s.draftBody, dark && dk.draftBody]}>{text}</Text>
       )}
+      {block.why_detail ? (
+        <Pressable onPress={() => setShowWhy((v) => !v)}>
+          <Text style={[s.draftLabel, dark && dk.mono, { color: "#C7B8FF" }]}>
+            {showWhy ? "WHY I WROTE THIS —" : "WHY I WROTE THIS +"}
+          </Text>
+          {showWhy ? (
+            <Text style={[s.caption, dark && dk.caption, { marginTop: 4 }]}>
+              {block.why_detail}
+            </Text>
+          ) : null}
+        </Pressable>
+      ) : null}
       <View style={s.outfitActions}>
         {deferred ? (
           <Pressable
@@ -260,6 +273,39 @@ function DraftCardView({
           </>
         )}
       </View>
+    </View>
+  );
+}
+
+const TONE_COLORS: Record<string, string> = {
+  ask: "#FF9DA8",
+  did: "#C7B8FF",
+  filed: "#8B87A0",
+};
+
+function TimelineView({
+  block,
+  dark,
+}: {
+  block: Extract<LeafBlock, { type: "timeline" }>;
+  dark?: boolean;
+}) {
+  return (
+    <View style={[tl.wrap, dark && tl.wrapDark]}>
+      {block.items.map((item, i) => (
+        <View key={i} style={[tl.row, i > 0 && tl.rowBorder, i > 0 && dark && tl.rowBorderDark]}>
+          <Text style={tl.time}>{item.at}</Text>
+          <View style={tl.mid}>
+            <Text style={[tl.text, dark && dk.ink]} numberOfLines={2}>
+              {item.text}
+            </Text>
+            <Text style={[tl.verdict, { color: TONE_COLORS[item.tone ?? "filed"] ?? TONE_COLORS.filed }]}>
+              {item.verdict}
+            </Text>
+          </View>
+        </View>
+      ))}
+      {block.footer ? <Text style={tl.footer}>{block.footer}</Text> : null}
     </View>
   );
 }
@@ -466,6 +512,9 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
     case "draft_card":
       return <DraftCardView block={block} onDraftAction={ctx.onDraftAction} dark={dark} />;
 
+    case "timeline":
+      return <TimelineView block={block} dark={dark} />;
+
     case "action_row":
       return (
         <View style={s.actionRow}>
@@ -501,6 +550,55 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
 
 // Nano V1 palette — indigo black, lavender accent, mint for live/positive,
 // Instrument Serif display over JetBrains Mono micro-labels.
+const tl = StyleSheet.create({
+  wrap: {
+    borderRadius: 18,
+    padding: 14,
+    backgroundColor: "#F4F2FA",
+  },
+  wrapDark: {
+    backgroundColor: "#14101F",
+    borderWidth: 1,
+    borderColor: "rgba(199,184,255,0.10)",
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingVertical: 9,
+  },
+  rowBorder: {
+    borderTopWidth: 1,
+    borderTopColor: "rgba(0,0,0,0.06)",
+  },
+  rowBorderDark: {
+    borderTopColor: "rgba(199,184,255,0.08)",
+  },
+  time: {
+    width: 44,
+    fontSize: 11,
+    color: "#8B87A0",
+    fontVariant: ["tabular-nums"],
+    paddingTop: 1,
+  },
+  mid: { flex: 1 },
+  text: {
+    fontSize: 14,
+    color: "#2A2637",
+    marginBottom: 3,
+  },
+  verdict: {
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 1.1,
+  },
+  footer: {
+    marginTop: 10,
+    fontSize: 12,
+    color: "#8B87A0",
+    fontStyle: "italic",
+  },
+});
+
 const dk = StyleSheet.create({
   screenTitle: { color: "#F4F2FA", fontFamily: "InstrumentSerif_400Regular", fontWeight: "400" },
   sectionTitle: {

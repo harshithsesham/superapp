@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     # Pub/Sub topic for Gmail watch, e.g. projects/<proj>/topics/gmail-push. Empty = polling only.
     gmail_pubsub_topic: str = ""
 
+    # Default IANA timezone for greetings/schedules until per-user tz facts exist.
+    default_timezone: str = "America/Chicago"
+
     # Nano's voice (the interview, later the briefs). Empty key = silent stub.
     elevenlabs_api_key: str = ""
     nano_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"  # "George" — warm storyteller

@@ -120,6 +120,20 @@ export type DraftCard = {
   draft: string;
   status?: "waiting" | "edited" | "sent" | "dismissed";
   deferred_label?: string | null;
+  why_detail?: string | null;
+};
+
+export type TimelineItem = {
+  text: string;
+  verdict: string;
+  tone?: "ask" | "did" | "filed";
+  at: string;
+};
+
+export type Timeline = {
+  type: "timeline";
+  items: TimelineItem[];
+  footer?: string | null;
 };
 
 export type Action = {
@@ -133,7 +147,7 @@ export type ActionRow = {
   actions: Action[];
 };
 
-export type LeafBlock = TextBlock | InsightCard | StatRow | ImageCard | ListBlock | ImageGrid | OutfitCard | AgentCard | AgentGrid | DraftCard | ActionRow;
+export type LeafBlock = TextBlock | InsightCard | StatRow | ImageCard | ListBlock | ImageGrid | OutfitCard | AgentCard | AgentGrid | DraftCard | Timeline | ActionRow;
 
 export type Section = {
   type: "section";

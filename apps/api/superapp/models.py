@@ -21,6 +21,53 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class Decision(Base):
+    """The decision ledger (north star step 3) — every judgment call, typed.
+
+    Who decided (nano or the user), over which capability (action_key), and how
+    it landed (accepted / edited / rejected / undone / deferred / acted). The
+    permission kernel reads nothing else: autonomy is earned from these rows.
+    """
+
+    __tablename__ = "decisions"
+    __table_args__ = (
+        Index("ix_decisions_user_key", "user_id", "action_key", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    agent: Mapped[str] = mapped_column(String(32), nullable=False)
+    action_key: Mapped[str] = mapped_column(String(64), nullable=False)  # e.g. inbox.send_reply
+    decided_by: Mapped[str] = mapped_column(String(8), nullable=False)  # nano | user
+    verdict: Mapped[str] = mapped_column(String(16), nullable=False)  # accepted | edited | rejected | undone | deferred | acted
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AutonomyGrant(Base):
+    """A promotion on the autonomy ladder — always evidence-carrying.
+
+    level: 0 observe · 1 draft · 2 ask first · 3 act + report · 4 silent.
+    Grants above the default level exist only with the user's explicit yes
+    (granted_by="user"); one undo revokes (revoked_at set, reason kept).
+    """
+
+    __tablename__ = "autonomy_grants"
+    __table_args__ = (
+        Index("ix_grants_user_key", "user_id", "action_key"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    action_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    level: Mapped[int] = mapped_column(nullable=False)
+    granted_by: Mapped[str] = mapped_column(String(8), default="user")  # user | system
+    evidence: Mapped[dict] = mapped_column(JSON, default=dict)  # counts at grant time
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoke_reason: Mapped[str] = mapped_column(String(128), default="")
+
+
 class UserFact(Base):
     """Semantic memory — the heart of the app (architecture §6.2).
 

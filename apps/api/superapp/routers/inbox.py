@@ -156,17 +156,23 @@ def send_draft(draft_id: str, user_id: str = Depends(current_user_id), db: Sessi
     draft = get_draft(db, user_id=user_id, draft_id=draft_id)
     if draft.status == "sent":
         raise HTTPException(status_code=409, detail="Already sent")
+    was_edited = draft.status == "edited"
     msg = db.get(InboxMessage, draft.message_id)
     token = get_token(db, user_id=user_id, provider=f"gmail:{msg.account_email}")
     client = GmailClient(json.loads(token) if token else None)
     sent_id = client.send_reply(to_addr=msg.from_addr, subject=msg.subject,
                                 body=draft.body, thread_id=msg.thread_id)
+    from ..kernel import record_decision
     from ..models import utcnow
     draft.status = "sent"
     draft.sent_at = utcnow()
     msg.settled = True
     append_event(db, user_id=user_id, type="draft_sent", agent="inbox", domain="inbox",
-                 payload={"draft_id": draft.id, "gmail_sent_id": sent_id, "edited": draft.status == "edited"})
+                 payload={"draft_id": draft.id, "gmail_sent_id": sent_id, "edited": was_edited})
+    # The tap is a typed verdict: sent-as-written is the kernel's cleanest signal.
+    record_decision(db, user_id=user_id, agent="inbox", action_key="inbox.send_reply",
+                    decided_by="user", verdict="edited" if was_edited else "accepted",
+                    payload={"draft_id": draft.id})
     db.commit()
     return render_screen(db, agent="inbox", user_id=user_id).model_dump()
 
@@ -202,5 +208,8 @@ def defer_draft(draft_id: str, body: DeferBody | None = None,
     draft.defer_until = six_pm_local.replace(tzinfo=timezone.utc) + offset
     append_event(db, user_id=user_id, type="draft_deferred", agent="inbox", domain="inbox",
                  payload={"draft_id": draft.id})
+    from ..kernel import record_decision
+    record_decision(db, user_id=user_id, agent="inbox", action_key="inbox.send_reply",
+                    decided_by="user", verdict="deferred", payload={"draft_id": draft.id})
     db.commit()
     return render_screen(db, agent="inbox", user_id=user_id).model_dump()

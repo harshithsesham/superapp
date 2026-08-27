@@ -128,6 +128,21 @@ class AgentGrid(BaseModel):
     items: list[AgentGridItem]
 
 
+class TimelineItem(BaseModel):
+    text: str  # what happened, one line
+    verdict: str  # fate chip: BECAME A QUESTION / REPLY DRAFTED / FILED / APPLIED SILENTLY ...
+    tone: Literal["ask", "did", "filed"] = "filed"  # rose / lavender / faint
+    at: str  # "07:02"
+
+
+class Timeline(BaseModel):
+    """The signal-fate ledger (Nano V4): every signal ends in a verdict."""
+
+    type: Literal["timeline"] = "timeline"
+    items: list[TimelineItem]
+    footer: str | None = None  # "1,204 signals today. One became a question."
+
+
 class DraftCard(BaseModel):
     """A reply written and waiting (the Nano inbox). The client owns the feel:
     inline editing, optimistic send, defer. id is the draft id; the client
@@ -142,6 +157,7 @@ class DraftCard(BaseModel):
     draft: str
     status: Literal["waiting", "edited", "sent", "dismissed"] = "waiting"
     deferred_label: str | None = None  # e.g. "ASKING AGAIN AT 6PM" — card stays visible, settled
+    why_detail: str | None = None  # expandable "WHY I WROTE THIS" rationale
 
 
 class Action(BaseModel):
@@ -156,7 +172,7 @@ class ActionRow(BaseModel):
 
 
 LeafBlock = Annotated[
-    Union[TextBlock, InsightCard, StatRow, ImageCard, ListBlock, ImageGrid, OutfitCard, AgentCard, AgentGrid, DraftCard, ActionRow],
+    Union[TextBlock, InsightCard, StatRow, ImageCard, ListBlock, ImageGrid, OutfitCard, AgentCard, AgentGrid, DraftCard, Timeline, ActionRow],
     Field(discriminator="type"),
 ]
 

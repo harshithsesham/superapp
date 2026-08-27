@@ -27,13 +27,16 @@ AGENT_SCOPES: dict[str, list[str] | None] = {
 # Domain twin loaders: extra per-domain data included in the slice when the
 # agent's scope covers that domain. Twins hold records; facts hold beliefs.
 def _twin_loaders() -> dict:
-    from . import finance, inbox, nutrition, wardrobe
+    from ..kernel import autonomy_context
+    from . import activity, finance, inbox, nutrition, wardrobe
 
     return {
         "nutrition": nutrition.meals_context,
         "finance": finance.finance_context,
         "wardrobe": wardrobe.wardrobe_context,
         "inbox": inbox.inbox_context,
+        "activity": activity.activity_context,
+        "autonomy": autonomy_context,
     }
 
 
@@ -46,6 +49,7 @@ CONTEXT_EXCLUDED_EVENT_TYPES = ["screen_view", "llm_call"]
 class ContextSlice:
     user_id: str
     agent: str
+    user_name: str = ""
     facts: list[dict] = field(default_factory=list)
     recent_events: list[dict] = field(default_factory=list)
     domain_data: dict = field(default_factory=dict)  # {domain: twin payload}
@@ -71,6 +75,12 @@ def get_context(db: Session, *, agent: str, user_id: str) -> ContextSlice:
         exclude_types=CONTEXT_EXCLUDED_EVENT_TYPES,
     )
 
+    from ..models import User
+
+    user_row = db.get(User, user_id)
+    user_name = (user_row.name.split()[0] if user_row and user_row.name
+                 else user_id.capitalize())
+
     loaders = _twin_loaders()
     twin_domains = loaders.keys() if domains is None else [d for d in domains if d in loaders]
     domain_data = {d: loaders[d](db, user_id) for d in twin_domains}
@@ -78,6 +88,7 @@ def get_context(db: Session, *, agent: str, user_id: str) -> ContextSlice:
     return ContextSlice(
         user_id=user_id,
         agent=agent,
+        user_name=user_name,
         domain_data=domain_data,
         facts=[
             {

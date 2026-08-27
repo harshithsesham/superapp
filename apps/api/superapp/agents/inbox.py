@@ -34,6 +34,7 @@ from ..substrate import ContextSlice
 from ..substrate.events import recent_events
 from ..substrate.inbox import accounts, create_draft, insert_message
 from ..vault import get_token
+from ..kernel import record_decision
 from .base import EventWrite, FactWrite, ThinkResult, register_agent
 
 TRIAGE_SYSTEM = (
@@ -221,6 +222,16 @@ def _sync(db: Session, context: ContextSlice, trigger: dict) -> ThinkResult:
                 create_draft(db, user_id=context.user_id, message_id=msg.id,
                              body=_draft_reply(db, context, provider, msg))
             counts[msg.tier] += 1
+            # Nano's own verdicts go in the ledger too — the "did without
+            # asking" side of the autonomy panel is counted, never estimated.
+            if msg.tier in ("cleared", "receipt"):
+                record_decision(db, user_id=context.user_id, agent="inbox",
+                                action_key="inbox.archive_noise", decided_by="nano",
+                                verdict="acted", payload={"message_id": msg.id})
+            elif msg.tier == "worth_knowing":
+                record_decision(db, user_id=context.user_id, agent="inbox",
+                                action_key="inbox.flag_to_read", decided_by="nano",
+                                verdict="acted", payload={"message_id": msg.id})
     db.flush()
 
     result.event_writes.append(EventWrite(type="inbox_synced", domain="inbox", payload=counts))
@@ -326,11 +337,22 @@ def inbox_render(context: ContextSlice) -> Screen:
     ask_blocks: list = []
     for a in asks:  # deferred asks stay visible, settled — they never just vanish
         d = a.get("draft") or {}
+        prior = a.get("prior_from_sender", 0)
+        why_bits = []
+        if a.get("why_now"):
+            why_bits.append(a["why_now"].rstrip("."))
+        if a.get("gist") and a.get("gist") != a.get("why_now"):
+            why_bits.append(a["gist"].rstrip("."))
+        if prior:
+            why_bits.append(f"{prior + 1} emails from this sender lately")
+        why_detail = (". ".join(why_bits) + ". Drafted from the thread in your voice — "
+                      "nothing sends until you say so.")
         ask_blocks.append(DraftCard(
             id=d.get("id", a["id"]), agent="inbox", from_name=a["from_name"],
             subject=a["subject"], why=a["why_now"] or a["gist"],
             draft=d.get("body", ""), status=d.get("status", "waiting"),
             deferred_label="ASKING AGAIN AT 6PM" if d.get("deferred") else None,
+            why_detail=why_detail,
         ))
     if not asks:
         ask_blocks.append(TextBlock(text="Nothing needs your words right now.", variant="caption"))
