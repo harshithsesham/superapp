@@ -46,12 +46,20 @@ def _autonomy_section(autonomy: dict) -> Section | None:
             if c["last_demotion_reason"]:
                 sub = f"demoted — {c['last_demotion_reason']} · " + sub
         items.append(ListItem(id=c["action_key"], title=label, subtitle=sub))
-    return Section(title="Without asking · earned, not configured", blocks=[
-        ListBlock(items=items),
-        TextBlock(text="Nano earns each of these from your decisions and loses "
-                       "it on one undo. There is no settings page.",
-                  variant="caption"),
-    ])
+    blocks: list = [ListBlock(items=items)]
+    promotable = [c for c in caps if c["promotable"]]
+    if promotable:
+        blocks.append(ActionRow(actions=[
+            Action(id=f"kernel.promote:{c['action_key']}",
+                   label=f"{_CAPABILITY_LABELS.get(c['action_key'], c['action_key'])}: "
+                         "yes, without asking")
+            for c in promotable
+        ]))
+    blocks.append(TextBlock(
+        text="Nano earns each of these from your decisions and loses "
+             "it on one undo. There is no settings page.",
+        variant="caption"))
+    return Section(title="Without asking · earned, not configured", blocks=blocks)
 
 
 _WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"]

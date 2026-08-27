@@ -272,6 +272,26 @@ export default function App() {
         })();
         return;
       }
+      if (kind === "action_tapped" && targetId.startsWith("kernel.promote:")) {
+        // The explicit yes that grants autonomy — never taken, only given.
+        const actionKey = targetId.slice("kernel.promote:".length);
+        setBusy(true);
+        fetch(`${apiUrl}/v1/kernel/promote`, {
+          method: "POST",
+          headers: { ...AUTH, "Content-Type": "application/json" },
+          body: JSON.stringify({ action_key: actionKey }),
+        })
+          .then(async (res) => {
+            if (!res.ok) {
+              const d = await res.json().catch(() => null);
+              setError(d?.detail ?? "That one is not earned yet.");
+            }
+            await load();
+          })
+          .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+          .finally(() => setBusy(false));
+        return;
+      }
       if (kind === "action_tapped" && targetId === "finance.link") {
         setBusy(true);
         fetch(`${apiUrl}/v1/finance/link/sandbox`, { method: "POST", headers: AUTH })
