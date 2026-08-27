@@ -10,7 +10,7 @@ import hashlib
 import hmac as hmac_mod
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -98,7 +98,8 @@ def sync_now(user_id: str = Depends(current_user_id), db: Session = Depends(get_
 
 
 @router.post("/gmail/webhook/{token}")
-async def gmail_webhook(token: str, request: Request, db: Session = Depends(get_db)):
+async def gmail_webhook(token: str, request: Request, background: BackgroundTasks,
+                        db: Session = Depends(get_db)):
     """Pub/Sub push: mail triaged seconds after it arrives."""
     settings = get_settings()
     if token != settings.gmail_webhook_token:
@@ -116,9 +117,13 @@ async def gmail_webhook(token: str, request: Request, db: Session = Depends(get_
         accts = list(db.scalars(select(GmailAccount).where(GmailAccount.email == email)))
     else:  # undecodable envelope: sync every connected user rather than miss mail
         accts = list(db.scalars(select(GmailAccount)))
+    # Ack Pub/Sub immediately; triage continues in the background (Google
+    # retries un-acked pushes, which would double-trigger slow syncs).
+    from ..routers.screen import _background_think
+
     for user in {a.user_id for a in accts}:
-        run_think(db, agent="inbox", user_id=user,
-                  trigger={"kind": "email_sync", "reason": "pubsub"})
+        background.add_task(_background_think, "inbox", user,
+                            {"kind": "email_sync", "reason": "pubsub"})
     return {"ok": True}
 
 
