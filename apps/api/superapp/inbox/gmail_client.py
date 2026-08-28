@@ -124,7 +124,17 @@ class GmailClient:
             if not page:
                 break
         new_hid = str(data.get("historyId", history_id))
-        msgs = [self._parse(self._get(f"/messages/{mid}", format="full")) for mid in dict.fromkeys(ids)]
+        msgs = []
+        for mid in dict.fromkeys(ids):
+            try:
+                msgs.append(self._parse(self._get(f"/messages/{mid}", format="full")))
+            except httpx.HTTPStatusError as exc:
+                # Mail can vanish between the history listing and the fetch
+                # (spam purges, immediate deletes). Skip it; never let one
+                # ghost message kill the whole sync.
+                if exc.response.status_code == 404:
+                    continue
+                raise
         return [m for m in msgs if m], new_hid
 
     def _parse(self, raw: dict) -> dict | None:

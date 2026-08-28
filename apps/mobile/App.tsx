@@ -41,7 +41,56 @@ function applySession(sess: StoredSession) {
 const SCREENS = ["hub", "inbox", "home", "finance", "stylist"] as const;
 type ScreenName = (typeof SCREENS)[number];
 
-export default function App() {
+// A crash must never be a black screen: show the error and offer a retry.
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: "#08070E", justifyContent: "center", padding: 32 }}>
+          <Text style={{ color: "#FF9DA8", fontSize: 16, marginBottom: 12 }}>
+            Something broke on this screen.
+          </Text>
+          <Text style={{ color: "#8A87A3", fontSize: 12, marginBottom: 24 }}>
+            {String(this.state.error?.message ?? this.state.error)}
+          </Text>
+          <Pressable
+            style={{ backgroundColor: "#C7B8FF", borderRadius: 12, padding: 14, alignItems: "center" }}
+            onPress={() => this.setState({ error: null })}
+          >
+            <Text style={{ color: "#08070E", fontWeight: "600" }}>Try again</Text>
+          </Pressable>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function Boot() {
+  // Visible while fonts/session resolve — never a black void.
+  return (
+    <View style={{ flex: 1, backgroundColor: "#08070E", justifyContent: "center", alignItems: "center" }}>
+      <ActivityIndicator color="#C7B8FF" />
+    </View>
+  );
+}
+
+export default function AppRoot() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  );
+}
+
+function App() {
   const [authState, setAuthState] = useState<"loading" | "signin" | "ready">("loading");
   const [interviewing, setInterviewing] = useState(false);
   const [screenName, setScreenName] = useState<ScreenName>("hub");
@@ -310,7 +359,7 @@ export default function App() {
   );
 
   const dark = (screen?.theme ?? lastTheme) === "dark";
-  if (!fontsLoaded || authState === "loading") return null;
+  if (!fontsLoaded || authState === "loading") return <Boot />;
   if (interviewing) {
     return (
       <InterviewScreen
