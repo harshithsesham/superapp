@@ -621,6 +621,26 @@ def test_semantic_memory_degrades_on_sqlite():
     db.close()
 
 
+def test_sent_by_nano_is_visible_and_in_voice_context():
+    # The send-flow tests sent a draft; it must appear on the inbox screen...
+    screen = client.get("/v1/screen/inbox", headers=AUTH).json()
+    sent_sec = next(sec for sec in screen["sections"]
+                    if (sec["title"] or "").startswith("Sent by Nano"))
+    rows = next(b for b in sent_sec["blocks"] if b["type"] == "list")["items"]
+    assert rows and all(r["detail"] for r in rows)  # readable, tap to expand
+    assert rows[0]["title"].startswith("To ")
+
+    # ...and in the orb's context, so "what did you send?" answers concretely.
+    from superapp.routers.voice import _inbox_for_voice
+    from superapp.substrate import get_context
+
+    db = SessionLocal()
+    voice = _inbox_for_voice(get_context(db, agent="hub", user_id="harshith"))
+    assert voice["recently_sent"] and voice["recently_sent"][0]["to"]
+    assert voice["recently_sent"][0]["body_excerpt"]
+    db.close()
+
+
 def test_draft_card_explains_why_it_wrote_this():
     screen = client.get("/v1/screen/inbox", headers=AUTH).json()
     card = next(b for sec in screen["sections"] for b in sec["blocks"]

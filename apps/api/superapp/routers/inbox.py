@@ -173,6 +173,10 @@ def send_draft(draft_id: str, user_id: str = Depends(current_user_id), db: Sessi
     record_decision(db, user_id=user_id, agent="inbox", action_key="inbox.send_reply",
                     decided_by="user", verdict="edited" if was_edited else "accepted",
                     payload={"draft_id": draft.id})
+    from ..memory import remember
+    remember(db, user_id=user_id, domain="inbox", kind="sent", ref_id=draft.id,
+             content=f"Nano replied to {msg.from_name} ({msg.from_addr}) — "
+                     f"{msg.subject}: {draft.body[:600]}")
     db.commit()
     return render_screen(db, agent="inbox", user_id=user_id).model_dump()
 

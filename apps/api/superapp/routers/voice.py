@@ -10,6 +10,7 @@ The spoken "send it" carries exactly the trust of the send button: same
 authenticated user, same trust-ladder gate, same decision-ledger row.
 """
 import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
@@ -21,7 +22,7 @@ from ..db import get_db
 from ..inbox.gmail_client import GmailClient
 from ..kernel import record_decision
 from ..llm.provider import LLMProvider
-from ..memory import recall
+from ..memory import recall, remember
 from ..models import InboxMessage, utcnow
 from ..substrate import get_context
 from ..substrate.events import append_event
@@ -54,6 +55,8 @@ CONVERSE_SYSTEM = (
     "sending THAT draft: action=send_new_email with to_addr, subject, "
     "reply_body. New recipients always get this read-back-and-confirm, "
     "no exceptions.\n"
+    "recently_sent in context is the record of what YOU sent for them — "
+    "when they ask what was sent, answer from it concretely (who, what, when).\n"
     "When they wrap up (goodbye, that's all, thanks I'm done): "
     "action=end_conversation with a short warm sign-off in say.\n"
     "Navigation requests: action=open_screen with screen "
@@ -110,6 +113,10 @@ def _inbox_for_voice(context) -> dict:
             "from": r["from_name"], "gist": r["gist"] or r["subject"],
         } for r in inbox.get("worth_knowing", [])[:6]],
         "cleared_count": inbox.get("cleared_count", 0),
+        "recently_sent": [{
+            "to": x["to_name"] or x["to_addr"], "subject": x["subject"],
+            "body_excerpt": x["body"][:300], "sent_at": x["sent_at"],
+        } for x in inbox.get("sent", [])[:6]],
         "sending_enabled": get_settings().gmail_scope_tier in ("send", "modify"),
     }
 
@@ -178,10 +185,15 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
             return {"say": "No mailbox is connected yet."}
         token = get_token(db, user_id=user_id, provider=f"gmail:{accts[0].email}")
         client = GmailClient(json.loads(token) if token else None)
-        sent_id = client.send_new(to_addr=addr, subject=parsed.get("subject") or "(no subject)",
-                                  body=parsed["reply_body"])
+        subject = parsed.get("subject") or "(no subject)"
+        sent_id = client.send_new(to_addr=addr, subject=subject, body=parsed["reply_body"])
         append_event(db, user_id=user_id, type="email_sent_new", agent="orb", domain="inbox",
-                     payload={"to": addr, "gmail_sent_id": sent_id, "via": "voice"})
+                     payload={"to": addr, "subject": subject,
+                              "body": parsed["reply_body"][:2000],
+                              "gmail_sent_id": sent_id, "via": "voice"})
+        remember(db, user_id=user_id, domain="inbox", kind="sent", ref_id=sent_id,
+                 content=f"Nano sent an email to {addr} — {subject}: "
+                         f"{parsed['reply_body'][:600]}")
         # New recipient: hard-capped at ask-first in the kernel, forever.
         record_decision(db, user_id=user_id, agent="inbox",
                         action_key="inbox.send_new_recipient", decided_by="user",
@@ -209,6 +221,9 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
         append_event(db, user_id=user_id, type="draft_sent", agent="orb", domain="inbox",
                      payload={"draft_id": draft.id, "gmail_sent_id": sent_id,
                               "edited": was_edited, "via": "voice"})
+        remember(db, user_id=user_id, domain="inbox", kind="sent", ref_id=draft.id,
+                 content=f"Nano replied to {msg.from_name} ({msg.from_addr}) — "
+                         f"{msg.subject}: {draft.body[:600]}")
         # The spoken yes is a typed verdict, same as the tap.
         record_decision(db, user_id=user_id, agent="inbox", action_key="inbox.send_reply",
                         decided_by="user", verdict="edited" if was_edited else "accepted",
@@ -268,7 +283,14 @@ def converse(body: ConverseBody, user_id: str = Depends(current_user_id),
 
     append_event(db, user_id=user_id, type="voice_command", agent="orb",
                  payload={"heard": body.messages[-1].text[:200],
+                          "said": parsed["say"][:200],
                           "action": parsed["action_type"], "screen": parsed.get("screen", "")})
+    if parsed["action_type"] == "end_conversation" and len(body.messages) > 1:
+        convo = " / ".join(f"{t.role}: {t.text[:150]}" for t in body.messages[-12:])
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M")
+        remember(db, user_id=user_id, domain="identity", kind="conversation",
+                 ref_id=f"voice-{stamp}",
+                 content=f"Voice conversation with Nano: {convo[:1600]}")
     db.commit()
     return {
         "say": parsed["say"], "action": parsed["action_type"],

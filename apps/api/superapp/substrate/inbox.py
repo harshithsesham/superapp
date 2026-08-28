@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import GmailAccount, InboxDraft, InboxMessage
+from ..models import Event, GmailAccount, InboxDraft, InboxMessage
 
 
 def upsert_account(db: Session, *, user_id: str, email: str) -> GmailAccount:
@@ -90,6 +90,34 @@ def inbox_context(db: Session, user_id: str) -> dict:
         key = m.clear_reason or "other"
         cleared_by_reason[key] = cleared_by_reason.get(key, 0) + 1
 
+    sent: list[dict] = []
+    sent_drafts = db.scalars(
+        select(InboxDraft).where(InboxDraft.user_id == user_id,
+                                 InboxDraft.status == "sent")
+        .order_by(InboxDraft.sent_at.desc()).limit(8))
+    by_id = {m.id: m for m in msgs}
+    for d in sent_drafts:
+        m = by_id.get(d.message_id) or db.get(InboxMessage, d.message_id)
+        if m is None:
+            continue
+        sent.append({
+            "kind": "reply", "to_name": m.from_name, "to_addr": m.from_addr,
+            "subject": m.subject, "body": d.body[:2500],
+            "sent_at": aware(d.sent_at).isoformat() if d.sent_at else "",
+        })
+    new_sends = db.scalars(
+        select(Event).where(Event.user_id == user_id, Event.type == "email_sent_new")
+        .order_by(Event.created_at.desc()).limit(8))
+    for e in new_sends:
+        sent.append({
+            "kind": "new", "to_name": e.payload.get("to", ""),
+            "to_addr": e.payload.get("to", ""),
+            "subject": e.payload.get("subject", ""),
+            "body": e.payload.get("body", "")[:2500],
+            "sent_at": aware(e.created_at).isoformat(),
+        })
+    sent.sort(key=lambda x: x["sent_at"], reverse=True)
+
     return {
         "connected": bool(accounts(db, user_id)),
         "needs_reply": open_asks,
@@ -98,4 +126,5 @@ def inbox_context(db: Session, user_id: str) -> dict:
         "cleared_by_reason": cleared_by_reason,
         "receipts": [row(m) for m in msgs if m.tier == "receipt"][:10],
         "pending_count": sum(1 for m in msgs if m.tier == "pending"),
+        "sent": sent[:10],
     }

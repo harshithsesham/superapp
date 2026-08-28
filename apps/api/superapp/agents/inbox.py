@@ -368,6 +368,18 @@ def inbox_render(context: ContextSlice) -> Screen:
             ])
         ]))
 
+    sent = data.get("sent", [])
+    if sent:
+        sections.append(Section(title=f"Sent by Nano · {len(sent)}", blocks=[
+            ListBlock(items=[
+                ListItem(id=f"sent-{i}", title=f"To {x['to_name'] or x['to_addr']}",
+                         subtitle=x["subject"] or x["body"][:70],
+                         trailing=x["sent_at"][11:16] if len(x["sent_at"]) > 16 else None,
+                         detail=f"{x['subject']}\n\n{x['body']}".strip())
+                for i, x in enumerate(sent)
+            ])
+        ]))
+
     cleared = data.get("cleared_count", 0)
     if cleared:
         by_reason = data.get("cleared_by_reason", {})
