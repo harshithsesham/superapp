@@ -487,6 +487,7 @@ function App() {
           setTimeout(() => load(), 6000);
         }}
         onStartInterview={() => setInterviewing(true)}
+        onActed={() => load()}
       />
     </SafeAreaView>
     </SafeAreaProvider>

@@ -14,18 +14,22 @@ import {
 
 type OrbPhase = "idle" | "greeting" | "listening" | "thinking" | "speaking";
 
+type ConverseTurn = { role: "user" | "nano"; text: string };
+
 export function NanoOrb({
   apiUrl,
   auth,
   onNavigate,
   onRefreshInbox,
   onStartInterview,
+  onActed,
 }: {
   apiUrl: string;
   auth: Record<string, string>;
   onNavigate: (screen: string) => void;
   onRefreshInbox: () => void;
   onStartInterview: () => void;
+  onActed?: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
@@ -35,6 +39,7 @@ export function NanoOrb({
   const [sayUrl, setSayUrl] = useState<string | null>(null);
   const offeredInterview = useRef(false);
   const finalRef = useRef("");
+  const history = useRef<ConverseTurn[]>([]);
 
   const glide = useRef(new Animated.Value(0)).current; // 0 = docked, 1 = in-screen
   const breath = useRef(new Animated.Value(0)).current;
@@ -136,45 +141,44 @@ export function NanoOrb({
         return;
       }
       setPhase("thinking");
+      history.current = [...history.current, { role: "user" as const, text }].slice(-24);
       try {
-        const res = await fetch(`${apiUrl}/v1/voice/command`, {
+        const res = await fetch(`${apiUrl}/v1/voice/converse`, {
           method: "POST",
           headers: { ...auth, "Content-Type": "application/json" },
-          body: JSON.stringify({ transcript: text }),
+          body: JSON.stringify({ messages: history.current }),
         });
         const r = await res.json();
-        if (r.intent === "start_interview") {
+        if (r.say) history.current = [...history.current, { role: "nano" as const, text: r.say }];
+
+        if (r.action === "start_interview") {
           collapse();
           onStartInterview();
           return;
         }
-        if (r.intent === "open_screen" && r.screen) {
-          speak(r.say || `Opening ${r.screen}.`);
-          setPhase("speaking");
-          onNavigate(r.screen);
-          setTimeout(collapse, 1400);
-          return;
-        }
-        if (r.intent === "refresh_inbox") {
-          speak(r.say || "Checking your mail.");
-          setPhase("speaking");
-          onRefreshInbox();
-          setTimeout(collapse, 1400);
-          return;
-        }
-        // answer / none: say it, then listen again so it feels like a conversation.
+        if (r.action === "open_screen" && r.screen) onNavigate(r.screen);
+        if (r.action === "refresh_inbox") onRefreshInbox();
+        if (r.acted) onActed?.();
+
         speak(r.say || "Hmm — try that once more?");
         setPhase("speaking");
-        setTimeout(() => listen(), Math.min(4000, 900 + (r.say?.length ?? 20) * 55));
+        const speakMs = Math.min(22000, 900 + (r.say?.length ?? 20) * 55);
+        if (r.listen) {
+          // Conversation continues: listen again when Nano stops talking.
+          setTimeout(() => listen(), speakMs);
+        } else {
+          setTimeout(collapse, speakMs + 400);
+        }
       } catch {
         setSay("I couldn't reach the server.");
         setPhase("greeting");
       }
     },
-    [apiUrl, auth, collapse, listen, onNavigate, onRefreshInbox, onStartInterview, speak]
+    [apiUrl, auth, collapse, listen, onActed, onNavigate, onRefreshInbox, onStartInterview, speak]
   );
 
   const openOrb = useCallback(async () => {
+    history.current = [];
     setOpen(true);
     Animated.parallel([
       Animated.timing(glide, { toValue: 1, duration: 520, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
@@ -186,6 +190,7 @@ export function NanoOrb({
       const h = await res.json();
       if (h.offer === "interview" && !offeredInterview.current) {
         offeredInterview.current = true;
+        history.current = [{ role: "nano", text: h.say }];
         speak(h.say);
         setPhase("speaking");
         setTimeout(() => listen(), Math.min(9000, 1200 + h.say.length * 55));

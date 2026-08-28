@@ -527,23 +527,32 @@ def test_decision_ledger_and_autonomy_panel():
     assert any(r["id"] == "inbox.archive_noise" for r in rows)
 
 
-def test_voice_orb_hello_and_commands():
+def test_voice_orb_hello_and_conversation():
     # No identity facts yet: the orb's first words are the get-to-know-you ask.
     hello = client.post("/v1/voice/hello", headers=AUTH).json()
     assert hello["offer"] == "interview" and "get to know you" in hello["say"]
 
-    # Stub intent routing: navigation phrases resolve to screens.
-    r = client.post("/v1/voice/command", headers=AUTH,
-                    json={"transcript": "show me my emails"}).json()
-    assert r["intent"] == "open_screen" and r["screen"] == "inbox"
-    r = client.post("/v1/voice/command", headers=AUTH,
-                    json={"transcript": "yes let's do it"}).json()
-    assert r["intent"] == "start_interview"
+    # "What needs my attention" speaks the actual senders and offers next steps
+    # (asks were settled by the send-flow tests, so accept either shape).
+    r = client.post("/v1/voice/converse", headers=AUTH,
+                    json={"messages": [{"role": "user", "text": "what needs my attention?"}]}).json()
+    assert r["say"] and ("Want me to" in r["say"] or "clear" in r["say"])
+    assert r["action"] == "none"
 
-    # Every command lands in the event ledger.
+    # Navigation still works through conversation.
+    r = client.post("/v1/voice/converse", headers=AUTH,
+                    json={"messages": [{"role": "user", "text": "show me my emails"}]}).json()
+    assert r["action"] == "open_screen" and r["screen"] == "inbox"
+
+    # Old app builds' one-shot shape still answers.
+    r = client.post("/v1/voice/command", headers=AUTH,
+                    json={"transcript": "go to my hub"}).json()
+    assert r["intent"] == "open_screen" and r["screen"] == "hub"
+
+    # Every exchange lands in the event ledger.
     db = SessionLocal()
-    events = recent_events(db, user_id="harshith", limit=5, types=["voice_command"])
-    assert len(events) >= 2
+    events = recent_events(db, user_id="harshith", limit=8, types=["voice_command"])
+    assert len(events) >= 3
     db.close()
 
 
