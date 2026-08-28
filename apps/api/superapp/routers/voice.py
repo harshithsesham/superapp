@@ -48,6 +48,14 @@ CONVERSE_SYSTEM = (
     "Send ONLY when they explicitly say to send THIS message: "
     "action=send_draft with draft_id. Never send unasked. If they decline, "
     "move on gracefully.\n"
+    "Writing a NEW email (not a reply): they must give you the address — "
+    "NEVER guess or invent one. Compose it in their voice, read it back in "
+    "`say` (action=none, listen=true). Only after they explicitly confirm "
+    "sending THAT draft: action=send_new_email with to_addr, subject, "
+    "reply_body. New recipients always get this read-back-and-confirm, "
+    "no exceptions.\n"
+    "When they wrap up (goodbye, that's all, thanks I'm done): "
+    "action=end_conversation with a short warm sign-off in say.\n"
     "Navigation requests: action=open_screen with screen "
     "(hub|inbox|home|finance|stylist). Mail check: action=refresh_inbox. "
     "They agree to the get-to-know-you conversation: action=start_interview.\n"
@@ -61,14 +69,18 @@ CONVERSE_SCHEMA = {
         "say": {"type": "string"},
         "action_type": {"type": "string",
                         "enum": ["none", "open_screen", "refresh_inbox", "start_interview",
-                                 "draft_reply", "send_draft"]},
+                                 "draft_reply", "send_draft", "send_new_email",
+                                 "end_conversation"]},
         "screen": {"type": "string", "enum": ["hub", "inbox", "home", "finance", "stylist", ""]},
         "draft_id": {"type": "string"},
         "message_id": {"type": "string"},
         "reply_body": {"type": "string"},
+        "to_addr": {"type": "string"},
+        "subject": {"type": "string"},
         "listen": {"type": "boolean"},
     },
-    "required": ["say", "action_type", "screen", "draft_id", "message_id", "reply_body", "listen"],
+    "required": ["say", "action_type", "screen", "draft_id", "message_id", "reply_body",
+                 "to_addr", "subject", "listen"],
     "additionalProperties": False,
 }
 
@@ -128,8 +140,7 @@ def _stub_converse(user_text: str, voice_inbox: dict) -> dict:
                     "say": f"Opening your {screen}."}
     if any(w in t for w in ("yes", "sure", "let's", "start")):
         return {**base, "action_type": "start_interview", "say": "Wonderful — let's talk."}
-    return {**base, "say": "Tell me what you need — your inbox, or anything on your plate.",
-            "listen": True}
+    return {**base, "say": "Say that once more?", "listen": True}
 
 
 def _execute(db: Session, user_id: str, parsed: dict) -> dict:
@@ -153,6 +164,28 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
             create_draft(db, user_id=user_id, message_id=msg.id, body=parsed["reply_body"])
             append_event(db, user_id=user_id, type="draft_created", agent="orb", domain="inbox",
                          payload={"message_id": msg.id, "via": "voice"})
+        return {}
+    if action == "send_new_email" and parsed.get("to_addr") and parsed.get("reply_body"):
+        settings = get_settings()
+        if settings.gmail_scope_tier not in ("send", "modify"):
+            return {"say": "Sending is still switched off — I can draft, but you send."}
+        addr = parsed["to_addr"].strip()
+        if "@" not in addr or " " in addr:
+            return {"say": "I don't have a real address for them — spell it out for me?"}
+        from ..substrate.inbox import accounts
+        accts = accounts(db, user_id)
+        if not accts:
+            return {"say": "No mailbox is connected yet."}
+        token = get_token(db, user_id=user_id, provider=f"gmail:{accts[0].email}")
+        client = GmailClient(json.loads(token) if token else None)
+        sent_id = client.send_new(to_addr=addr, subject=parsed.get("subject") or "(no subject)",
+                                  body=parsed["reply_body"])
+        append_event(db, user_id=user_id, type="email_sent_new", agent="orb", domain="inbox",
+                     payload={"to": addr, "gmail_sent_id": sent_id, "via": "voice"})
+        # New recipient: hard-capped at ask-first in the kernel, forever.
+        record_decision(db, user_id=user_id, agent="inbox",
+                        action_key="inbox.send_new_recipient", decided_by="user",
+                        verdict="accepted", payload={"to": addr, "via": "voice"})
         return {}
     if action == "send_draft" and parsed["draft_id"]:
         settings = get_settings()
@@ -240,7 +273,7 @@ def converse(body: ConverseBody, user_id: str = Depends(current_user_id),
     return {
         "say": parsed["say"], "action": parsed["action_type"],
         "screen": parsed.get("screen", ""), "listen": parsed.get("listen", False),
-        "acted": parsed["action_type"] in ("draft_reply", "send_draft"),
+        "acted": parsed["action_type"] in ("draft_reply", "send_draft", "send_new_email"),
     }
 
 

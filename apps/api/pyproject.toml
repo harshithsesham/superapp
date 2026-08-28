@@ -11,7 +11,7 @@ dependencies = [
     "alembic>=1.13",
     "psycopg2-binary>=2.9",
     "python-multipart>=0.0.9",
-    "httpx>=0.27",
+    "httpx[http2]>=0.27",
     "cryptography>=42",
 ]
 

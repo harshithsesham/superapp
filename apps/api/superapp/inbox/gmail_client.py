@@ -170,6 +170,15 @@ class GmailClient:
         raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
         return self._post("/messages/send", {"raw": raw, "threadId": thread_id})["id"]
 
+    def send_new(self, *, to_addr: str, subject: str, body: str) -> str:
+        if self.stubbed:
+            return f"stub-sent-new-{int(time.time())}"
+        mime = MIMEText(body)
+        mime["To"] = to_addr
+        mime["Subject"] = subject
+        raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
+        return self._post("/messages/send", {"raw": raw})["id"]
+
     def archive(self, gmail_msg_id: str) -> None:
         if self.stubbed:
             return
