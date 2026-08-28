@@ -26,6 +26,8 @@ services:
       SUPERAPP_DATABASE_URL: postgresql+psycopg2://superapp:${SUPERAPP_DB_PASSWORD}@db:5432/superapp
     volumes:
       - media:/app/media
+      # APNs signing key lives on the host, read-only in the container.
+      - ../apns.p8:/app/apns.p8:ro
     depends_on:
       db:
         condition: service_healthy
