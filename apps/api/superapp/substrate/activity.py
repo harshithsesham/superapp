@@ -32,11 +32,16 @@ def activity_context(db: Session, user_id: str) -> dict:
     now = datetime.now(timezone.utc)
     day_start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
 
-    signals_today = db.scalar(
+    events_today = db.scalar(
         select(func.count()).select_from(Event).where(
             Event.user_id == user_id, Event.created_at >= day_start,
             Event.type.not_in(_NOISE))
     ) or 0
+    mail_today = db.scalar(
+        select(func.count()).select_from(InboxMessage).where(
+            InboxMessage.user_id == user_id, InboxMessage.created_at >= day_start)
+    ) or 0
+    signals_today = events_today + mail_today
 
     items = []
     # Mail signals get their tier verdicts (the richest source today).

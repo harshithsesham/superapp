@@ -92,6 +92,9 @@ def _brief_card(data: dict, activity: dict) -> AgentCard:
     cleared = inbox.get("cleared_count", 0)
     if cleared:
         parts.append(f"filed {cleared} emails you never had to see")
+    reads = len(inbox.get("worth_knowing", []))
+    if reads:
+        parts.append(f"flagged {reads} email{'s' if reads != 1 else ''} worth a look")
     drafted = sum(1 for a in inbox.get("needs_reply", []) if a.get("draft"))
     if drafted:
         parts.append(f"drafted {drafted} repl{'y' if drafted == 1 else 'ies'}")
