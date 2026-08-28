@@ -566,6 +566,61 @@ def test_worth_knowing_emails_are_readable():
     assert all(i.get("detail") for i in items)  # tap-to-read body present
 
 
+def test_reflection_writes_brief_and_hub_speaks_it():
+    # Nightly reflection (stub LLM -> deterministic fallback brief) writes the
+    # hub/reflection_brief fact and logs its run.
+    r = client.post("/v1/agents/orchestrator/think?kind=nightly", headers=AUTH).json()
+    assert r["agent"] == "orchestrator" and r["facts_written"] >= 1
+
+    db = SessionLocal()
+    facts = read_facts(db, user_id="harshith", domains=["hub"], limit=5)
+    brief = next(f for f in facts if f.key == "reflection_brief")
+    assert brief.value["text"] and brief.value["date"]
+    runs = recent_events(db, user_id="harshith", limit=5, types=["reflection_run"])
+    assert runs and "remembered" in runs[0].payload
+    db.close()
+
+    # The Hub's brief card speaks the fresh reflection verbatim.
+    hub = client.get("/v1/screen/hub", headers=AUTH).json()
+    cards = [b for sec in hub["sections"] for b in sec["blocks"] if b["type"] == "agent_card"]
+    assert next(c for c in cards if c["id"] == "morning-brief")["body"] == brief.value["text"]
+
+
+def test_push_respects_the_attention_cap(monkeypatch):
+    import superapp.push as push_module
+    from superapp.push import send_push
+    from superapp.substrate import write_fact
+
+    class _FakeResp:
+        def raise_for_status(self):
+            return self
+
+    monkeypatch.setattr(push_module.httpx, "post", lambda *a, **k: _FakeResp())
+
+    db = SessionLocal()
+    # A registered (fake) expo token makes sends observable; APNs is unconfigured.
+    write_fact(db, user_id="cap-user", domain="system", key="expo_push_token",
+               value={"token": "ExponentPushToken[test]"}, confidence=1.0, source_agent="user")
+    db.commit()
+    sent = sum(send_push(db, user_id="cap-user", title="t", body=str(i)) for i in range(6))
+    db.commit()
+    suppressed = recent_events(db, user_id="cap-user", limit=10, types=["push_suppressed"])
+    logged = recent_events(db, user_id="cap-user", limit=10, types=["push_sent"])
+    # Cap = 3: only three attempts became push_sent events, the rest suppressed.
+    assert len(logged) == 3 and len(suppressed) == 3
+    db.close()
+
+
+def test_semantic_memory_degrades_on_sqlite():
+    from superapp.memory import recall, remember
+
+    db = SessionLocal()
+    remember(db, user_id="harshith", domain="inbox", kind="email", ref_id="x",
+             content="Lease renewal from Marcus")
+    assert recall(db, user_id="harshith", query="lease") == []  # postgres-only, silently
+    db.close()
+
+
 def test_draft_card_explains_why_it_wrote_this():
     screen = client.get("/v1/screen/inbox", headers=AUTH).json()
     card = next(b for sec in screen["sections"] for b in sec["blocks"]

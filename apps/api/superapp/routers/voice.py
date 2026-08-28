@@ -21,6 +21,7 @@ from ..db import get_db
 from ..inbox.gmail_client import GmailClient
 from ..kernel import record_decision
 from ..llm.provider import LLMProvider
+from ..memory import recall
 from ..models import InboxMessage, utcnow
 from ..substrate import get_context
 from ..substrate.events import append_event
@@ -212,6 +213,8 @@ def converse(body: ConverseBody, user_id: str = Depends(current_user_id),
         prompt=json.dumps({
             "conversation": [t.model_dump() for t in body.messages[-16:]],
             "inbox": voice_inbox,
+            "remembered": recall(db, user_id=user_id,
+                                 query=body.messages[-1].text, k=4),
             "person": [f for f in context.facts if f["domain"] in ("identity", "inbox", "goals")][:12],
             "knows_person": any(f["domain"] == "identity" for f in context.facts),
         }, sort_keys=True),

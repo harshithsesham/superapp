@@ -69,6 +69,21 @@ class Settings(BaseSettings):
     # Default IANA timezone for greetings/schedules until per-user tz facts exist.
     default_timezone: str = "America/Chicago"
 
+    # Direct APNs (north star step 4): the .p8 signing key from the Apple
+    # developer account. Empty path = pushes fall back to Expo token or no-op.
+    apns_key_path: str = ""
+    apns_key_id: str = ""
+    apns_team_id: str = "JAUSPN67UY"
+    apns_bundle_id: str = "com.harshith.superapp"
+    apns_sandbox: bool = False
+
+    # Voyage embeddings for semantic recall. Empty key = deterministic stub.
+    voyage_api_key: str = ""
+
+    # The attention budget's hard floor (full budget logic is step 5): Nano
+    # never interrupts more than this many times a day.
+    max_pushes_per_day: int = 3
+
     # Nano's voice (the interview, later the briefs). Empty key = silent stub.
     elevenlabs_api_key: str = ""
     nano_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"  # "George" — warm storyteller

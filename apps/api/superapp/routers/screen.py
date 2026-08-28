@@ -70,15 +70,17 @@ def refresh_screen(name: str, background: BackgroundTasks,
 
 
 @router.post("/agents/{name}/think")
-def think(name: str, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
-    """Background trigger (cron/webhook): cognition + write-backs, no UI."""
+def think(name: str, kind: str = "scheduled", user_id: str = Depends(current_user_id),
+          db: Session = Depends(get_db)):
+    """Background trigger (cron/webhook): cognition + write-backs, no UI.
+    `kind` lets cron name the moment (morning/nightly) for trigger-aware agents."""
     try:
         spec = get_agent(name)
     except ValueError:
         raise HTTPException(status_code=404, detail=f"No agent named {name!r}")
     if spec.think is None:
         raise HTTPException(status_code=400, detail=f"Agent {name!r} has no think step")
-    return run_think(db, agent=name, user_id=user_id, trigger={"kind": "scheduled"})
+    return run_think(db, agent=name, user_id=user_id, trigger={"kind": kind[:24]})
 
 
 class UserReaction(BaseModel):

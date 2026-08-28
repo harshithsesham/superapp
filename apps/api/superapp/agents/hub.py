@@ -75,7 +75,7 @@ def _greeting(name: str) -> str:
     return f"Good {part}, {name}."
 
 
-def _brief_card(data: dict, activity: dict) -> AgentCard:
+def _brief_card(data: dict, activity: dict, reflection: dict | None = None) -> AgentCard:
     inbox = data.get("inbox", {})
     asks = [a for a in inbox.get("needs_reply", [])
             if not (a.get("draft") or {}).get("deferred")]
@@ -106,6 +106,10 @@ def _brief_card(data: dict, activity: dict) -> AgentCard:
     if questions:
         body += (" One thing needs your yes — it's below."
                  if questions == 1 else f" {questions} things need your yes — they're below.")
+    # The nightly reflection, when fresh, speaks better than any template.
+    from datetime import datetime, timezone
+    if reflection and reflection.get("date") == datetime.now(timezone.utc).date().isoformat():
+        body = reflection["text"]
 
     return AgentCard(
         id="morning-brief", agent="hub", name="Nano", sub="Your brief",
@@ -161,8 +165,10 @@ def hub_render(context: ContextSlice) -> Screen:
     if not has_identity:
         hero_blocks.append(TextBlock(
             text="Tap the orb — I'd like to get to know you.", variant="caption"))
+    reflection = next((f["value"] for f in context.facts
+                       if f["domain"] == "hub" and f["key"] == "reflection_brief"), None)
     if inbox_connected:
-        hero_blocks.append(_brief_card(data, activity))
+        hero_blocks.append(_brief_card(data, activity, reflection))
         hero_blocks.append(inbox_hero(data.get("inbox", {}), screen="inbox"))
     else:
         hero_blocks.append(TextBlock(

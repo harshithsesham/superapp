@@ -169,27 +169,27 @@ function App() {
     load();
   }, [load, authState, screenName]);
 
-  // Push registration — best-effort: in Expo Go without an EAS projectId this
-  // throws, and we silently stay push-less.
+  // Push registration — direct APNs (no Expo services): the raw device token
+  // goes to our server, which signs its own pushes with the .p8 key.
   useEffect(() => {
+    if (authState !== "ready") return;
     (async () => {
       try {
         const perm = await Notifications.requestPermissionsAsync();
         if (!perm.granted) return;
-        const projectId = Constants.expoConfig?.extra?.eas?.projectId;
-        const { data } = await Notifications.getExpoPushTokenAsync(
-          projectId ? { projectId } : undefined
-        );
+        const device = await Notifications.getDevicePushTokenAsync();
+        const token =
+          typeof device.data === "string" ? device.data : JSON.stringify(device.data);
         await fetch(`${apiUrl}/v1/devices/push-token`, {
           method: "POST",
           headers: { ...AUTH, "Content-Type": "application/json" },
-          body: JSON.stringify({ token: data }),
+          body: JSON.stringify({ token, kind: "apns" }),
         });
       } catch {
-        // no push in this environment; fine
+        // no push in this environment (simulator, denied permission); fine
       }
     })();
-  }, []);
+  }, [authState]);
 
   const logMealText = useCallback(async () => {
     const description = mealText.trim();
