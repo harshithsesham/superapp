@@ -39,6 +39,17 @@ function applySession(sess: StoredSession) {
   AUTH = { Authorization: `Bearer ${sess.token}` };
 }
 
+// Show Nano's pushes even when the app is foregrounded — without this, iOS
+// silently swallows notifications that arrive while the app is open.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
+
 const SCREENS = ["hub", "inbox", "home", "finance", "stylist"] as const;
 type ScreenName = (typeof SCREENS)[number];
 
