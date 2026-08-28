@@ -277,6 +277,39 @@ function DraftCardView({
   );
 }
 
+function ExpandableRow({
+  item,
+  dark,
+}: {
+  item: { id: string; title: string; subtitle?: string | null; trailing?: string | null; detail?: string | null };
+  dark?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const readable = !!item.detail;
+  return (
+    <Pressable onPress={readable ? () => setOpen((v) => !v) : undefined}>
+      <View style={s.listItem}>
+        <View style={{ flex: 1 }}>
+          <Text style={[s.body, dark && dk.ink]}>{item.title}</Text>
+          {item.subtitle ? (
+            <Text style={[s.caption, dark && dk.caption]}>{item.subtitle}</Text>
+          ) : null}
+        </View>
+        {item.trailing ? (
+          <Text style={[s.trailing, dark && dk.body]}>{item.trailing}</Text>
+        ) : readable ? (
+          <Text style={[s.caption, dark && dk.caption]}>{open ? "−" : "+"}</Text>
+        ) : null}
+      </View>
+      {open && item.detail ? (
+        <Text style={[s.caption, dark && dk.caption, { paddingBottom: 12, lineHeight: 19 }]}>
+          {item.detail}
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
 const TONE_COLORS: Record<string, string> = {
   ask: "#FF9DA8",
   did: "#C7B8FF",
@@ -398,15 +431,7 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
       return (
         <View style={[s.card, dark && dk.card]}>
           {block.items.map((item) => (
-            <View key={item.id} style={s.listItem}>
-              <View style={{ flex: 1 }}>
-                <Text style={[s.body, dark && dk.ink]}>{item.title}</Text>
-                {item.subtitle ? (
-                  <Text style={[s.caption, dark && dk.caption]}>{item.subtitle}</Text>
-                ) : null}
-              </View>
-              {item.trailing ? <Text style={[s.trailing, dark && dk.body]}>{item.trailing}</Text> : null}
-            </View>
+            <ExpandableRow key={item.id} item={item} dark={dark} />
           ))}
         </View>
       );

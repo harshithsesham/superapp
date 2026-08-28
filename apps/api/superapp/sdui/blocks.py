@@ -52,6 +52,7 @@ class ListItem(BaseModel):
     title: str
     subtitle: str | None = None
     trailing: str | None = None  # e.g. an amount or a time
+    detail: str | None = None  # tap to expand — the full content (email body, ...)
 
 
 class ListBlock(BaseModel):

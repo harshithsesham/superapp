@@ -362,7 +362,8 @@ def inbox_render(context: ContextSlice) -> Screen:
     if reads:
         sections.append(Section(title=f"Read only · nothing to do · {len(reads)}", blocks=[
             ListBlock(items=[
-                ListItem(id=r["id"], title=r["from_name"], subtitle=r["gist"] or r["subject"])
+                ListItem(id=r["id"], title=r["from_name"], subtitle=r["gist"] or r["subject"],
+                         detail=f"{r['subject']}\n\n{r['body']}".strip() or None)
                 for r in reads
             ])
         ]))

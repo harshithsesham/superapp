@@ -82,8 +82,12 @@ OPENER = (
     "yourself. Who are you, and what does your life look like right now?"
 )
 
-WELCOME_BACK = (
-    "Welcome back — no rush, we'll just pick up where we left off. "
+RESUME_INSTRUCTION = (
+    "The person just came back to continue this conversation after a break. "
+    "In your own words — one warm, natural sentence, different every time, "
+    "never 'welcome back, no rush' boilerplate — acknowledge them and then "
+    "re-raise your open question conversationally (rephrased, not verbatim). "
+    "Return it all as `question`."
 )
 
 STUB_QUESTIONS = {
@@ -126,7 +130,7 @@ def start(db: Session, user_id: str) -> tuple[InterviewSession, str, bool]:
         has_answers = db.scalar(select(InterviewTurn.id).where(
             InterviewTurn.session_id == session.id, InterviewTurn.role == "user"))
         if last_nano and has_answers:
-            text = WELCOME_BACK + last_nano.text
+            text = _resume_line(db, session, last_nano.text)
             _add_turn(db, session, "nano", text)
             return session, text, True
         return session, (last_nano.text if last_nano else OPENER), False
@@ -135,6 +139,26 @@ def start(db: Session, user_id: str) -> tuple[InterviewSession, str, bool]:
     db.flush()
     _add_turn(db, session, "nano", OPENER)
     return session, OPENER, False
+
+
+def _resume_line(db: Session, session: InterviewSession, open_question: str) -> str:
+    provider = LLMProvider()
+    resp = provider.complete(
+        db, user_id=session.user_id, agent="interviewer", task="interview_question",
+        system=INTERVIEWER_SYSTEM,
+        prompt=json.dumps({
+            "instruction": RESUME_INSTRUCTION,
+            "recent_transcript": transcript(db, session.id)[-12:],
+            "open_question": open_question,
+        }, sort_keys=True),
+        schema=QUESTION_SCHEMA,
+    )
+    if not (resp.stubbed or resp.refused):
+        try:
+            return json.loads(resp.text)["question"]
+        except (json.JSONDecodeError, KeyError):
+            pass
+    return "Good to have you back. So — " + open_question[0].lower() + open_question[1:]
 
 
 def answer(db: Session, session: InterviewSession, user_text: str) -> tuple[str, bool, float]:

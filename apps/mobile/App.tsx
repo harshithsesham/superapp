@@ -21,6 +21,7 @@ import {
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { InterviewScreen } from "./src/InterviewScreen";
+import { NanoOrb } from "./src/NanoOrb";
 import { SduiScreen } from "./src/sdui/renderer";
 import { SDUI_VERSION } from "./src/sdui/types";
 import type { Screen } from "./src/sdui/types";
@@ -475,6 +476,18 @@ function App() {
           </Pressable>
         </View>
       )}
+
+      <NanoOrb
+        apiUrl={apiUrl}
+        auth={AUTH}
+        onNavigate={onNavigate}
+        onRefreshInbox={() => {
+          setScreenName("inbox");
+          load(true);
+          setTimeout(() => load(), 6000);
+        }}
+        onStartInterview={() => setInterviewing(true)}
+      />
     </SafeAreaView>
     </SafeAreaProvider>
   );

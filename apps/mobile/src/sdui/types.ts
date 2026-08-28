@@ -44,6 +44,7 @@ export type ListItem = {
   title: string;
   subtitle?: string | null;
   trailing?: string | null;
+  detail?: string | null;
 };
 
 export type ListBlock = {

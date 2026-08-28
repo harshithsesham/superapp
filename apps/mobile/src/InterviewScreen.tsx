@@ -34,6 +34,9 @@ export function InterviewScreen({
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState<string | null>(null);
   const finalRef = useRef("");
+  const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startListeningRef = useRef<(() => void) | null>(null);
+  const finishAnswerRef = useRef<(() => void) | null>(null);
 
   const audioSource = turn?.audio_url
     ? { uri: `${apiUrl}${turn.audio_url}`, headers: auth }
@@ -46,7 +49,17 @@ export function InterviewScreen({
         player.play();
       } catch {}
     }
-  }, [turn?.audio_url]);
+    // When Nano stops talking, it starts listening — like a person would.
+    if (turn && !turn.done && phase === "asking") {
+      const speakMs = audioSource
+        ? Math.min(30000, 1500 + turn.question.length * 62)
+        : 900;
+      const t = setTimeout(() => {
+        startListeningRef.current?.();
+      }, speakMs);
+      return () => clearTimeout(t);
+    }
+  }, [turn?.audio_url, turn?.question, phase]);
 
   useSpeechRecognitionEvent("result", (e) => {
     const best = e.results?.[0]?.transcript ?? "";
@@ -56,6 +69,11 @@ export function InterviewScreen({
     } else {
       setTranscript((finalRef.current + " " + best).trim());
     }
+    // Quiet for 2.6s after saying something = done talking. No button needed.
+    if (silenceTimer.current) clearTimeout(silenceTimer.current);
+    silenceTimer.current = setTimeout(() => {
+      finishAnswerRef.current?.();
+    }, 2600);
   });
   useSpeechRecognitionEvent("error", () => {
     // Recognition hiccup: keep whatever we have; user can retry or type nothing.
@@ -123,6 +141,12 @@ export function InterviewScreen({
     }
   }, [transcript, turn]);
 
+  startListeningRef.current = startListening;
+  finishAnswerRef.current = () => {
+    if (silenceTimer.current) clearTimeout(silenceTimer.current);
+    finishAnswer();
+  };
+
   const progressPct = Math.round((turn?.progress ?? 0) * 100);
 
   return (
@@ -157,13 +181,13 @@ export function InterviewScreen({
 
         <View style={s.controls}>
           {phase === "asking" && (
-            <Pressable style={s.talkBtn} onPress={startListening}>
-              <Text style={s.talkText}>Hold on — let me answer</Text>
+            <Pressable onPress={startListening} hitSlop={10}>
+              <Text style={s.hint}>TAP IF I DON'T HEAR YOU</Text>
             </Pressable>
           )}
           {phase === "listening" && (
-            <Pressable style={[s.talkBtn, s.doneBtn]} onPress={finishAnswer}>
-              <Text style={s.talkText}>I'm done</Text>
+            <Pressable onPress={() => finishAnswerRef.current?.()} hitSlop={10}>
+              <Text style={s.hint}>I'M DONE</Text>
             </Pressable>
           )}
           {phase === "finished" && (
@@ -178,6 +202,14 @@ export function InterviewScreen({
 }
 
 const s = StyleSheet.create({
+  hint: {
+    fontFamily: "JetBrainsMono_400Regular",
+    fontSize: 10,
+    letterSpacing: 2.2,
+    color: "#8A87A3",
+    textAlign: "center",
+    padding: 10,
+  },
   root: { flex: 1, backgroundColor: "#08070E" },
   header: {
     flexDirection: "row",

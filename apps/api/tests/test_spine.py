@@ -211,8 +211,11 @@ def test_routing_tasks_use_small_model_low_effort():
     provider = LLMProvider()
     params = provider._build_params(task="triage", system="s", prompt="p", effort=None, max_tokens=None)
     assert params["model"] == "claude-haiku-4-5"
-    assert params["output_config"] == {"effort": "low"}
+    assert "output_config" not in params  # Haiku rejects the effort parameter
     assert params["system"][0]["cache_control"] == {"type": "ephemeral"}
+
+    heavy = provider._build_params(task="reply_draft", system="s", prompt="p", effort=None, max_tokens=None)
+    assert heavy["output_config"] == {"effort": "high"}
 
 
 # ---------------------------------------------------------------- Phase 2
@@ -522,6 +525,36 @@ def test_decision_ledger_and_autonomy_panel():
     assert "earned, not configured" in panel["title"]
     rows = next(b for b in panel["blocks"] if b["type"] == "list")["items"]
     assert any(r["id"] == "inbox.archive_noise" for r in rows)
+
+
+def test_voice_orb_hello_and_commands():
+    # No identity facts yet: the orb's first words are the get-to-know-you ask.
+    hello = client.post("/v1/voice/hello", headers=AUTH).json()
+    assert hello["offer"] == "interview" and "get to know you" in hello["say"]
+
+    # Stub intent routing: navigation phrases resolve to screens.
+    r = client.post("/v1/voice/command", headers=AUTH,
+                    json={"transcript": "show me my emails"}).json()
+    assert r["intent"] == "open_screen" and r["screen"] == "inbox"
+    r = client.post("/v1/voice/command", headers=AUTH,
+                    json={"transcript": "yes let's do it"}).json()
+    assert r["intent"] == "start_interview"
+
+    # Every command lands in the event ledger.
+    db = SessionLocal()
+    events = recent_events(db, user_id="harshith", limit=5, types=["voice_command"])
+    assert len(events) >= 2
+    db.close()
+
+
+def test_worth_knowing_emails_are_readable():
+    screen = client.get("/v1/screen/inbox", headers=AUTH).json()
+    reads = next((sec for sec in screen["sections"]
+                  if (sec["title"] or "").startswith("Read only")), None)
+    if reads is None:
+        return  # stub mailbox produced no worth_knowing this run
+    items = next(b for b in reads["blocks"] if b["type"] == "list")["items"]
+    assert all(i.get("detail") for i in items)  # tap-to-read body present
 
 
 def test_draft_card_explains_why_it_wrote_this():

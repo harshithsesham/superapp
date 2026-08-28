@@ -79,6 +79,7 @@ def inbox_context(db: Session, user_id: str) -> dict:
             "clear_reason": m.clear_reason, "tier": m.tier, "settled": m.settled,
             "received_at": aware(m.received_at).isoformat(),
             "prior_from_sender": from_counts.get(m.from_addr, 1) - 1,
+            "body": (m.body_text or "")[:2500],
             "draft": {"id": d.id, "body": d.body, "status": d.status, "deferred": deferred} if d else None,
         }
 

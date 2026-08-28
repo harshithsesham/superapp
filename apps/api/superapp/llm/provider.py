@@ -36,7 +36,7 @@ PRICES_PER_MTOK: dict[str, tuple[float, float]] = {
 }
 
 # Tasks that route to the small model, and their spend profile.
-ROUTING_TASKS = {"routing", "classification", "triage"}
+ROUTING_TASKS = {"routing", "classification", "triage", "voice_intent"}
 
 
 @dataclass
@@ -96,10 +96,12 @@ class LLMProvider:
                 {"type": "image", "source": {"type": "base64", "media_type": mt, "data": data}}
                 for mt, data in images
             ] + [{"type": "text", "text": prompt}]
-        output_config: dict = {"effort": effort or self._effort_for_task(task)}
+        output_config: dict = {}
+        if not model.startswith("claude-haiku"):  # Haiku has no effort parameter
+            output_config["effort"] = effort or self._effort_for_task(task)
         if schema is not None:
             output_config["format"] = {"type": "json_schema", "schema": schema}
-        return {
+        params: dict = {
             "model": model,
             "max_tokens": max_tokens or self._max_tokens_for_task(task),
             # Cached prefix: tools (none) + system. Volatile content stays in messages,
@@ -109,10 +111,12 @@ class LLMProvider:
                 {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
             ],
             "messages": [{"role": "user", "content": content}],
-            "output_config": output_config,
             # Thinking omitted on purpose: adaptive by default on Opus 5; routing
             # tasks on Haiku don't need it.
         }
+        if output_config:
+            params["output_config"] = output_config
+        return params
 
     def _stub(self, *, task: str, model: str, system: str, prompt: str, batched: bool) -> LLMResponse:
         return LLMResponse(
