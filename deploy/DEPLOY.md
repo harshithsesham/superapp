@@ -61,3 +61,21 @@ curl https://app.yourdomain.com/health   # {"ok": true}
 
 Whoever admins this server can read the database — including the other
 founder's triaged mail. Both founders should acknowledge this explicitly.
+
+## Deploying code (rsync)
+
+Deploys rsync the working tree from the dev machine — there are no GitHub
+credentials on the server. ALWAYS carry these excludes; `--delete` will
+otherwise remove server-only files (it deleted the APNs key once):
+
+```bash
+rsync -az --delete -e "ssh -i ~/.ssh/superapp.pem" \
+  --exclude '.git' --exclude '.env' --exclude 'media' --exclude 'backups' \
+  --exclude '.idea' --exclude 'node_modules' --exclude 'apps/mobile/ios' \
+  --exclude 'apps/mobile/build' --exclude '__pycache__' --exclude '.expo' \
+  --exclude 'apns.p8' --exclude 'cron.log' \
+  ./ ubuntu@3.17.83.242:/opt/super-app/
+```
+
+Server-only files that live in /opt/super-app and must survive deploys:
+`.env`, `apns.p8` (push signing key), `backups/`, `cron.log`.
