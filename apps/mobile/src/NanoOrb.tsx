@@ -4,6 +4,7 @@
 // the get-to-know-you conversation. Voice is the app's front door.
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { useAudioPlayer } from "expo-audio";
 import {
@@ -26,6 +27,7 @@ export function NanoOrb({
   onRefreshInbox: () => void;
   onStartInterview: () => void;
 }) {
+  const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<OrbPhase>("idle");
   const [transcript, setTranscript] = useState("");
@@ -207,7 +209,7 @@ export function NanoOrb({
           <Pressable style={StyleSheet.absoluteFill} onPress={collapse} />
         </Animated.View>
       ) : null}
-      <View pointerEvents="box-none" style={o.dock}>
+      <View pointerEvents="box-none" style={[o.dock, { top: insets.top + 4 }]}>
         <Animated.View
           style={{ transform: [{ translateY: orbTranslateY }, { scale: Animated.multiply(orbScale, scale) }] }}
         >
@@ -245,7 +247,6 @@ const o = StyleSheet.create({
   },
   dock: {
     position: "absolute",
-    top: 8,
     left: 0,
     right: 0,
     alignItems: "center",
