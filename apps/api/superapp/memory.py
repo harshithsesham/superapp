@@ -72,20 +72,43 @@ def remember(db: Session, *, user_id: str, domain: str, kind: str,
 
 def recall(db: Session, *, user_id: str, query: str, k: int = 5,
            domains: list[str] | None = None) -> list[dict]:
-    """The k memories closest to the query, cosine distance."""
+    """Hybrid recall — the 2026 production baseline: dense vectors (paraphrase)
+    + Postgres full-text (exact names, rare terms), fused with reciprocal-rank
+    fusion. Two cheap queries, fused in code; no extra infrastructure."""
     if not _available(db) or not query.strip():
         return []
-    vec = embed([query[:2000]])[0]
     domain_filter = "AND domain = ANY(:doms)" if domains else ""
-    rows = db.execute(text(f"""
-        SELECT domain, kind, content, created_at,
-               1 - (embedding <=> (:e)::vector) AS similarity
+    dom = {"doms": domains} if domains else {}
+
+    vec = embed([query[:2000]])[0]
+    dense = db.execute(text(f"""
+        SELECT id, domain, kind, content, created_at
         FROM memory_chunks
         WHERE user_id = :u {domain_filter}
         ORDER BY embedding <=> (:e)::vector
-        LIMIT :k
-    """), {"u": user_id, "e": json.dumps(vec), "k": k,
-           **({"doms": domains} if domains else {})}).mappings()
-    return [{"domain": r["domain"], "kind": r["kind"], "content": r["content"],
-             "when": r["created_at"].isoformat() if r["created_at"] else "",
-             "similarity": round(float(r["similarity"]), 3)} for r in rows]
+        LIMIT 20
+    """), {"u": user_id, "e": json.dumps(vec), **dom}).mappings().all()
+
+    lexical = db.execute(text(f"""
+        SELECT id, domain, kind, content, created_at
+        FROM memory_chunks
+        WHERE user_id = :u {domain_filter}
+          AND to_tsvector('english', content) @@ plainto_tsquery('english', :q)
+        ORDER BY ts_rank(to_tsvector('english', content),
+                         plainto_tsquery('english', :q)) DESC
+        LIMIT 20
+    """), {"u": user_id, "q": query[:500], **dom}).mappings().all()
+
+    # Reciprocal-rank fusion: rank-only, so the two score scales never fight.
+    scores: dict = {}
+    rows_by_id: dict = {}
+    for result in (dense, lexical):
+        for rank, r in enumerate(result):
+            rows_by_id[r["id"]] = r
+            scores[r["id"]] = scores.get(r["id"], 0.0) + 1.0 / (60 + rank)
+    top = sorted(scores, key=scores.get, reverse=True)[:k]
+    return [{"domain": rows_by_id[i]["domain"], "kind": rows_by_id[i]["kind"],
+             "content": rows_by_id[i]["content"],
+             "when": rows_by_id[i]["created_at"].isoformat()
+             if rows_by_id[i]["created_at"] else "",
+             "score": round(scores[i], 4)} for i in top]
