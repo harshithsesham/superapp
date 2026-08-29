@@ -1,9 +1,9 @@
-// The orb: Nano, always present, always one tap from a conversation.
-// Idle it breathes at the top of every screen. Tapped, it glides into the
-// screen — the app stays visible behind a light veil — and the conversation
-// simply runs: Nano speaks, listens, acts, listens again. It ends only when
-// you close it, say goodbye, or go quiet for a while. The get-to-know-you
-// interview happens right here in the same conversation — no screen switch.
+// The orb: Nano, hanging around the edge of every screen — half-tucked and
+// breathing when idle, and when tapped it comes to you: slides out, grows a
+// little, and listens. No takeover, no veil — the app stays fully usable;
+// the conversation lives in a small bubble beside the orb. It leaves only
+// when you tap it again or say goodbye. The get-to-know-you interview
+// happens right here in the same conversation — no screen switch.
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -56,7 +56,6 @@ export function NanoOrb({
 
   const glide = useRef(new Animated.Value(0)).current;
   const breath = useRef(new Animated.Value(0)).current;
-  const dim = useRef(new Animated.Value(0)).current;
 
   const player = useAudioPlayer(sayUrl ? { uri: sayUrl, headers: auth } : null);
   useEffect(() => {
@@ -116,10 +115,9 @@ export function NanoOrb({
     try {
       ExpoSpeechRecognitionModule.stop();
     } catch {}
-    Animated.parallel([
-      Animated.timing(glide, { toValue: 0, duration: 380, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      Animated.timing(dim, { toValue: 0, duration: 380, useNativeDriver: true }),
-    ]).start(() => {
+    Animated.timing(glide, {
+      toValue: 0, duration: 380, easing: Easing.out(Easing.cubic), useNativeDriver: true,
+    }).start(() => {
       setOpen(false);
       setPhase("idle");
       setTranscript("");
@@ -308,10 +306,9 @@ export function NanoOrb({
     emptyListens.current = 0;
     history.current = [];
     setOpen(true);
-    Animated.parallel([
-      Animated.timing(glide, { toValue: 1, duration: 520, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      Animated.timing(dim, { toValue: 1, duration: 520, useNativeDriver: true }),
-    ]).start();
+    Animated.timing(glide, {
+      toValue: 1, duration: 460, easing: Easing.out(Easing.back(1.4)), useNativeDriver: true,
+    }).start();
     // Realtime first — live duplex talk. Fall back to the turn loop quietly.
     if (await startRealtime()) return;
     try {
@@ -326,22 +323,12 @@ export function NanoOrb({
     listen();
   }, [apiUrl, auth, listen, speakThen, startRealtime]);
 
-  // Tap while it talks = interrupt: stop the audio, start listening.
+  // Closed: tap brings Nano over. Open: tap sends it back to the edge —
+  // the only way it leaves besides an explicit goodbye.
   const onOrbTap = useCallback(() => {
-    if (!openRef.current) {
-      openOrb();
-      return;
-    }
-    if (!rtActive.current && phase === "speaking") {
-      try {
-        player.pause();
-      } catch {}
-      if (speakTimer.current) clearTimeout(speakTimer.current);
-      listen();
-    } else {
-      collapse();
-    }
-  }, [phase, openOrb, listen, collapse, player]);
+    if (!openRef.current) openOrb();
+    else collapse();
+  }, [openOrb, collapse]);
 
   useEffect(() => {
     if (!rtActive.current) return;
@@ -349,110 +336,104 @@ export function NanoOrb({
   }, [rt.isSpeaking]);
 
   const scale = breath.interpolate({ inputRange: [0, 1], outputRange: [1, phase === "listening" ? 1.16 : 1.06] });
-  const orbTranslateY = glide.interpolate({ inputRange: [0, 1], outputRange: [0, 190] });
-  const orbScale = glide.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] });
+  const orbTranslateX = glide.interpolate({ inputRange: [0, 1], outputRange: [0, -26] });
+  const orbTranslateY = glide.interpolate({ inputRange: [0, 1], outputRange: [0, 34] });
+  const orbScale = glide.interpolate({ inputRange: [0, 1], outputRange: [1, 1.55] });
 
   return (
-    <>
-      {open ? (
-        <Animated.View style={[o.overlay, { opacity: dim }]}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={collapse} />
-        </Animated.View>
+    <View pointerEvents="box-none" style={[o.dock, { top: insets.top + 64 }]}>
+      <Animated.View
+        style={{
+          transform: [
+            { translateX: orbTranslateX },
+            { translateY: orbTranslateY },
+            { scale: Animated.multiply(orbScale, scale) },
+          ],
+        }}
+      >
+        <Pressable onPress={onOrbTap} hitSlop={16}>
+          <LinearGradient
+            colors={["#C7B8FF", "#6D5BD0", "#2A2050"]}
+            start={{ x: 0.2, y: 0.1 }}
+            end={{ x: 0.8, y: 1 }}
+            style={o.orb}
+          />
+        </Pressable>
+      </Animated.View>
+      {open && (progress > 0 || phase === "listening" || phase === "thinking" || !!say) ? (
+        <View pointerEvents="box-none" style={o.bubble}>
+          {progress > 0 ? (
+            <View style={o.progressTrack}>
+              <View style={[o.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
+            </View>
+          ) : null}
+          {phase === "listening" ? (
+            <Text style={o.transcript}>{transcript || "listening…"}</Text>
+          ) : phase === "thinking" ? (
+            <Text style={o.status}>·  ·  ·</Text>
+          ) : say ? (
+            <Text style={o.say}>{say}</Text>
+          ) : null}
+        </View>
       ) : null}
-      <View pointerEvents="box-none" style={[o.dock, { top: insets.top + 4 }]}>
-        <Animated.View
-          style={{ transform: [{ translateY: orbTranslateY }, { scale: Animated.multiply(orbScale, scale) }] }}
-        >
-          <Pressable onPress={onOrbTap} hitSlop={14}>
-            <LinearGradient
-              colors={["#C7B8FF", "#6D5BD0", "#2A2050"]}
-              start={{ x: 0.2, y: 0.1 }}
-              end={{ x: 0.8, y: 1 }}
-              style={o.orb}
-            />
-          </Pressable>
-        </Animated.View>
-        {open ? (
-          <View pointerEvents="box-none" style={o.voicePanel}>
-            {progress > 0 ? (
-              <View style={o.progressTrack}>
-                <View style={[o.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
-              </View>
-            ) : null}
-            {phase === "listening" ? (
-              <Text style={o.transcript}>{transcript || " "}</Text>
-            ) : say ? (
-              <Text style={o.say}>{say}</Text>
-            ) : null}
-            {phase === "thinking" ? <Text style={o.status}>·  ·  ·</Text> : null}
-          </View>
-        ) : null}
-      </View>
-    </>
+    </View>
   );
 }
 
 const o = StyleSheet.create({
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(8,7,14,0.45)",
-    zIndex: 40,
-  },
   dock: {
     position: "absolute",
-    left: 0,
-    right: 0,
-    alignItems: "center",
+    right: -14, // half-tucked into the edge when idle
+    alignItems: "flex-end",
     zIndex: 50,
   },
   orb: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     shadowColor: "#C7B8FF",
     shadowOpacity: 0.55,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 0 },
   },
-  voicePanel: {
+  bubble: {
     position: "absolute",
-    top: 320,
-    left: 32,
-    right: 32,
-    alignItems: "center",
+    top: 96,
+    right: 34,
+    maxWidth: 290,
+    backgroundColor: "rgba(20,16,31,0.96)",
+    borderWidth: 1,
+    borderColor: "rgba(199,184,255,0.16)",
+    borderRadius: 18,
+    borderTopRightRadius: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   progressTrack: {
     alignSelf: "stretch",
     height: 2,
     borderRadius: 1,
     backgroundColor: "rgba(199,184,255,0.18)",
-    marginBottom: 18,
+    marginBottom: 10,
     overflow: "hidden",
   },
   progressFill: { height: 2, backgroundColor: "#C7B8FF" },
   status: {
     fontFamily: "JetBrainsMono_400Regular",
-    fontSize: 14,
+    fontSize: 12,
     letterSpacing: 4,
     color: "#8A87A3",
-    marginTop: 8,
   },
   say: {
     fontFamily: "InstrumentSerif_400Regular",
-    fontSize: 23,
-    lineHeight: 30,
+    fontSize: 17,
+    lineHeight: 23,
     color: "#F4F2FA",
-    textAlign: "center",
-    textShadowColor: "rgba(8,7,14,0.9)",
-    textShadowRadius: 10,
   },
   transcript: {
     fontFamily: "InstrumentSerif_400Regular",
-    fontSize: 21,
-    lineHeight: 28,
+    fontSize: 16,
+    lineHeight: 22,
     color: "#C7B8FF",
-    textAlign: "center",
-    textShadowColor: "rgba(8,7,14,0.9)",
-    textShadowRadius: 10,
   },
 });
