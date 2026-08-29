@@ -130,6 +130,111 @@ def fix_meal_route(meal_id: str, body: MealFix, user_id: str = Depends(current_u
     return render_screen(db, agent="nutrition", user_id=user_id).model_dump()
 
 
+class OnboardBody(BaseModel):
+    born_year: int | None = None
+    height_cm: float | None = None
+    weight_kg: float | None = None
+    steps_target: int | None = None
+    kcal_override: int | None = Field(default=None, ge=800, le=6000)
+    water_override: int | None = Field(default=None, ge=1000, le=6000)
+
+
+class SuggestBody(BaseModel):
+    born_year: int
+    height_cm: float
+    weight_kg: float
+    steps_target: int = 10000
+
+
+def _nutrition_state(db: Session, user_id: str) -> dict:
+    from datetime import datetime, timezone
+
+    from ..nutrition_plan import health_score
+    from ..substrate import read_facts
+    from ..substrate.nutrition import meals_context
+
+    data = meals_context(db, user_id)
+    facts = {f.key: f.value for f in read_facts(db, user_id=user_id,
+                                                domains=["nutrition"], limit=30)}
+    plan = facts.get("plan")
+    today = data["today"]
+    day_n = 0
+    if plan and plan.get("started"):
+        try:
+            started = datetime.fromisoformat(plan["started"]).date()
+            day_n = (datetime.now(timezone.utc).date() - started).days + 1
+        except ValueError:
+            day_n = 1
+    score, note = health_score(today, plan or {})
+    return {
+        "onboarded": plan is not None,
+        "plan": plan,
+        "profile": facts.get("profile"),
+        "today": today,
+        "week": data["week"],
+        "activity": data["activity"],
+        "day_n": day_n,
+        "health": {"score": score, "note": note},
+        "summary": (facts.get("last_summary") or {}).get("text", ""),
+    }
+
+
+@router.get("/nutrition/state")
+def nutrition_state(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """Everything the Cal screen renders, in one shot."""
+    return _nutrition_state(db, user_id)
+
+
+@router.post("/nutrition/onboard")
+def onboard(body: OnboardBody, user_id: str = Depends(current_user_id),
+            db: Session = Depends(get_db)):
+    """Cal Neo onboarding & settings: partial fields merge; overrides respected."""
+    from ..nutrition_plan import save_profile_and_plan
+
+    incoming = {k: v for k, v in body.model_dump().items()
+                if v is not None and k not in ("kcal_override", "water_override")}
+    plan = save_profile_and_plan(db, user_id, incoming or {"noop": True},
+                                 kcal_override=body.kcal_override,
+                                 water_override=body.water_override)
+    if plan is None:
+        raise HTTPException(status_code=422, detail="Need at least birth year, height, and weight")
+    append_event(db, user_id=user_id, type="nutrition_plan_set", agent="nutrition",
+                 domain="nutrition", payload={"kcal": plan["kcal"], "via": "onboarding"})
+    db.commit()
+    return _nutrition_state(db, user_id)
+
+
+@router.post("/nutrition/suggest")
+def suggest(body: SuggestBody, user_id: str = Depends(current_user_id)):
+    """Live suggestions for the targets step — computed, not stored."""
+    from ..nutrition_plan import compute_plan
+
+    plan = compute_plan({"born_year": body.born_year, "height_cm": body.height_cm,
+                         "weight_kg": body.weight_kg, "steps_target": body.steps_target})
+    if plan is None:
+        raise HTTPException(status_code=422, detail="Out-of-range numbers")
+    bmi = round(body.weight_kg / (body.height_cm / 100) ** 2, 1)
+    band = ("Underweight" if bmi < 18.5 else "Healthy" if bmi < 25
+            else "Overweight" if bmi < 30 else "Obese")
+    return {"kcal": plan["kcal"], "water_ml": plan["water_ml"], "bmi": bmi, "bmi_band": band}
+
+
+@router.post("/nutrition/reset")
+def reset_nutrition(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """Cal Neo settings: Restart onboarding — the plan and profile go, meals stay."""
+    from sqlalchemy import delete
+
+    from ..models import UserFact
+
+    db.execute(delete(UserFact).where(UserFact.user_id == user_id,
+                                      UserFact.domain == "nutrition",
+                                      UserFact.key.in_(("profile", "plan"))))
+    append_event(db, user_id=user_id, type="nutrition_reset", agent="nutrition",
+                 domain="nutrition", payload={})
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/media/{photo_id}")
 def get_media(photo_id: str, user_id: str = Depends(current_user_id)):
     try:

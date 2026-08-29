@@ -136,6 +136,9 @@ class NutritionMeal(Base):
     protein_g: Mapped[float | None] = mapped_column(Float)
     carbs_g: Mapped[float | None] = mapped_column(Float)
     fat_g: Mapped[float | None] = mapped_column(Float)
+    fiber_g: Mapped[float | None] = mapped_column(Float)
+    sugar_g: Mapped[float | None] = mapped_column(Float)
+    sodium_mg: Mapped[float | None] = mapped_column(Float)
     confidence: Mapped[float] = mapped_column(Float, default=0.0)  # 0 until estimated
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

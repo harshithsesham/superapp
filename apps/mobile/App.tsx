@@ -29,6 +29,7 @@ import {
 } from "@kingstinct/react-native-healthkit";
 import { InterviewScreen } from "./src/InterviewScreen";
 import { NanoOrb } from "./src/NanoOrb";
+import { CalScreen } from "./src/CalScreen";
 import { SduiScreen } from "./src/sdui/renderer";
 import { SDUI_VERSION } from "./src/sdui/types";
 import type { Screen } from "./src/sdui/types";
@@ -189,6 +190,8 @@ function App() {
     load();
   }, [load, authState, screenName]);
 
+  const [healthSignal, setHealthSignal] = useState(0);
+
   // HealthKit: read today's steps + active energy, report to the server.
   // Best-effort — denied permission or no data just means no activity line.
   useEffect(() => {
@@ -196,6 +199,7 @@ function App() {
     (async () => {
       try {
         if (!isHealthDataAvailable()) return;
+        void healthSignal;
         const ok = await requestHealthAuthorization({
           toRead: [
             "HKQuantityTypeIdentifierStepCount",
@@ -228,7 +232,7 @@ function App() {
         // no HealthKit in this environment; fine
       }
     })();
-  }, [authState]);
+  }, [authState, healthSignal]);
 
   // Push registration — direct APNs (no Expo services): the raw device token
   // goes to our server, which signs its own pushes with the .p8 key.
@@ -558,7 +562,7 @@ function App() {
       >
         {error ? (
           <Text style={styles.error}>{error}</Text>
-        ) : screen ? (
+        ) : screenName === "home" ? null : screen ? (
           <SduiScreen
             screen={screen}
             onReaction={onReaction}
@@ -572,7 +576,18 @@ function App() {
         )}
       </ScrollView>
 
-      {screenName === "home" && (
+      {screenName === "home" && !error ? (
+        <View style={{ position: "absolute", top: 60, left: 0, right: 0, bottom: 0 }}>
+          <CalScreen
+            apiUrl={apiUrl}
+            auth={AUTH}
+            onOpenOrb={() => setOrbSignal((n) => n + 1)}
+            onConnectHealth={() => setHealthSignal((n) => n + 1)}
+          />
+        </View>
+      ) : null}
+
+      {false && (
       <View style={[styles.logBar, dark && styles.logBarDark]}>
         <TextInput
           style={[styles.input, dark && styles.inputDark]}

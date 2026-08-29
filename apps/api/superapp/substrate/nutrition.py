@@ -19,7 +19,9 @@ def create_meal(db: Session, *, user_id: str, source: str, description: str = ""
 
 def update_meal_estimate(db: Session, *, user_id: str, meal_id: str, description: str,
                          kcal: int, protein_g: float, carbs_g: float, fat_g: float,
-                         confidence: float) -> NutritionMeal:
+                         confidence: float, fiber_g: float | None = None,
+                         sugar_g: float | None = None,
+                         sodium_mg: float | None = None) -> NutritionMeal:
     meal = db.get(NutritionMeal, meal_id)
     if meal is None or meal.user_id != user_id:
         raise ValueError(f"No meal {meal_id!r} for user")
@@ -29,6 +31,12 @@ def update_meal_estimate(db: Session, *, user_id: str, meal_id: str, description
     meal.carbs_g = carbs_g
     meal.fat_g = fat_g
     meal.confidence = confidence
+    if fiber_g is not None:
+        meal.fiber_g = fiber_g
+    if sugar_g is not None:
+        meal.sugar_g = sugar_g
+    if sodium_mg is not None:
+        meal.sodium_mg = sodium_mg
     db.flush()
     return meal
 
@@ -63,6 +71,9 @@ def meals_context(db: Session, user_id: str) -> dict:
             "protein_g": m.protein_g,
             "carbs_g": m.carbs_g,
             "fat_g": m.fat_g,
+            "fiber_g": m.fiber_g,
+            "sugar_g": m.sugar_g,
+            "sodium_mg": m.sodium_mg,
             "confidence": m.confidence,
         }
 
@@ -117,6 +128,9 @@ def meals_context(db: Session, user_id: str) -> dict:
             "protein_g": round(sum(m.protein_g or 0 for m in today), 1),
             "carbs_g": round(sum(m.carbs_g or 0 for m in today), 1),
             "fat_g": round(sum(m.fat_g or 0 for m in today), 1),
+            "fiber_g": round(sum(m.fiber_g or 0 for m in today), 1),
+            "sugar_g": round(sum(m.sugar_g or 0 for m in today), 1),
+            "sodium_mg": round(sum(m.sodium_mg or 0 for m in today)),
             "water_ml": int(water_ml),
             "meals": [row(m) for m in today],
         },

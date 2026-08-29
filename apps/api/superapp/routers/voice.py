@@ -186,26 +186,17 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
                          payload={"message_id": msg.id, "via": "voice"})
         return {}
     if action == "set_nutrition" and parsed.get("profile_json"):
-        from ..nutrition_plan import compute_plan, sanitize_profile
-        from ..substrate import read_facts, write_fact
+        from ..nutrition_plan import save_profile_and_plan
 
         try:
-            incoming = sanitize_profile(json.loads(parsed["profile_json"]))
+            incoming = json.loads(parsed["profile_json"])
         except json.JSONDecodeError:
             return {"say": "I didn't quite get those numbers — run them by me again?"}
-        if not incoming:
+        plan = save_profile_and_plan(db, user_id, incoming)
+        if plan is None:
             return {"say": "I didn't quite get those numbers — run them by me again?"}
-        facts = read_facts(db, user_id=user_id, domains=["nutrition"], limit=30)
-        existing = next((f.value for f in facts if f.key == "profile"), {})
-        profile = {**existing, **incoming}
-        write_fact(db, user_id=user_id, domain="nutrition", key="profile",
-                   value=profile, confidence=1.0, source_agent="orb")
-        plan = compute_plan(profile)
-        if plan:
-            write_fact(db, user_id=user_id, domain="nutrition", key="plan",
-                       value=plan, confidence=1.0, source_agent="orb")
-            append_event(db, user_id=user_id, type="nutrition_plan_set", agent="orb",
-                         domain="nutrition", payload=plan)
+        append_event(db, user_id=user_id, type="nutrition_plan_set", agent="orb",
+                     domain="nutrition", payload={k: plan[k] for k in ("kcal", "goal")})
         return {}
     if action == "log_water":
         try:

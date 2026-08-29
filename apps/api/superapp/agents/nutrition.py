@@ -50,13 +50,18 @@ MEAL_SCHEMA = {
         "protein_g": {"type": "number"},
         "carbs_g": {"type": "number"},
         "fat_g": {"type": "number"},
+        "fiber_g": {"type": "number"},
+        "sugar_g": {"type": "number"},
+        "sodium_mg": {"type": "number"},
         "confidence": {"type": "number"},
     },
-    "required": ["description", "kcal", "protein_g", "carbs_g", "fat_g", "confidence"],
+    "required": ["description", "kcal", "protein_g", "carbs_g", "fat_g",
+                 "fiber_g", "sugar_g", "sodium_mg", "confidence"],
     "additionalProperties": False,
 }
 
-STUB_ESTIMATE = {"kcal": 500, "protein_g": 20.0, "carbs_g": 50.0, "fat_g": 20.0, "confidence": 0.2}
+STUB_ESTIMATE = {"kcal": 500, "protein_g": 20.0, "carbs_g": 50.0, "fat_g": 20.0,
+                 "fiber_g": 5.0, "sugar_g": 10.0, "sodium_mg": 600.0, "confidence": 0.2}
 
 
 def _plan(context: ContextSlice) -> dict | None:
@@ -111,6 +116,9 @@ def _estimate_meal(db: Session, context: ContextSlice, trigger: dict) -> ThinkRe
         carbs_g=float(estimate["carbs_g"]),
         fat_g=float(estimate["fat_g"]),
         confidence=float(estimate["confidence"]),
+        fiber_g=float(estimate.get("fiber_g") or 0),
+        sugar_g=float(estimate.get("sugar_g") or 0),
+        sodium_mg=float(estimate.get("sodium_mg") or 0),
     )
     return ThinkResult(
         event_writes=[
@@ -200,6 +208,9 @@ def fix_meal(db: Session, *, user_id: str, meal_id: str, note: str,
         carbs_g=float(estimate["carbs_g"]),
         fat_g=float(estimate["fat_g"]),
         confidence=float(estimate["confidence"]),
+        fiber_g=float(estimate.get("fiber_g") or 0),
+        sugar_g=float(estimate.get("sugar_g") or 0),
+        sodium_mg=float(estimate.get("sodium_mg") or 0),
     )
     return estimate
 

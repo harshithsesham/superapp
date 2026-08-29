@@ -683,6 +683,38 @@ def test_nutrition_plan_from_voice_profile():
     assert any("Snap the plate" in a["label"] for a in actions["actions"])
 
 
+def test_cal_neo_onboarding_flow():
+    # Suggest: live numbers for the targets step, nothing stored.
+    r = client.post("/v1/nutrition/suggest", headers=AUTH,
+                    json={"born_year": 1996, "height_cm": 172, "weight_kg": 70,
+                          "steps_target": 10000}).json()
+    assert 2000 < r["kcal"] < 3200 and r["bmi"] == 23.7 and r["bmi_band"] == "Healthy"
+
+    # Onboard: partial body + overrides -> plan with quiet targets and a start date.
+    state = client.post("/v1/nutrition/onboard", headers=AUTH,
+                        json={"born_year": 1996, "height_cm": 172, "weight_kg": 70,
+                              "steps_target": 10000, "kcal_override": 2200,
+                              "water_override": 2500}).json()
+    plan = state["plan"]
+    assert state["onboarded"] and plan["kcal"] == 2200 and plan["water_ml"] == 2500
+    assert plan["fiber_g"] == round(2200 / 1000 * 14) and plan["sugar_g_max"] == 55
+    assert plan["steps_target"] == 10000 and plan["started"]
+    assert state["day_n"] >= 1
+
+    # Settings-style nudge: override only, profile persists, started survives.
+    state2 = client.post("/v1/nutrition/onboard", headers=AUTH,
+                         json={"kcal_override": 2100}).json()
+    assert state2["plan"]["kcal"] == 2100
+    assert state2["plan"]["started"] == plan["started"]
+
+    # Health score: no meals -> unscored; with meals -> 5..100 with a note.
+    from superapp.nutrition_plan import health_score
+    assert health_score({"meals": []}, plan)[0] == -1
+    s100, note = health_score({"meals": [1], "kcal": 900, "protein_g": 60,
+                               "fiber_g": 12, "sugar_g": 10, "sodium_mg": 800}, plan)
+    assert 5 <= s100 <= 100 and "meal" in note
+
+
 def test_draft_card_explains_why_it_wrote_this():
     screen = client.get("/v1/screen/inbox", headers=AUTH).json()
     card = next(b for sec in screen["sections"] for b in sec["blocks"]
