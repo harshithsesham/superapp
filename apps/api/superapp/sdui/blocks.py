@@ -144,6 +144,21 @@ class MeterRow(BaseModel):
     meters: list[Meter]
 
 
+class Bar(BaseModel):
+    label: str  # "Mon"
+    value: float
+    accent: bool = False  # today
+
+
+class BarChart(BaseModel):
+    """Small history chart — bars scaled to max, one accent bar."""
+
+    type: Literal["bar_chart"] = "bar_chart"
+    bars: list[Bar]
+    target: float | None = None  # reference line value (e.g. daily kcal plan)
+    caption: str | None = None
+
+
 class TimelineItem(BaseModel):
     text: str  # what happened, one line
     verdict: str  # fate chip: BECAME A QUESTION / REPLY DRAFTED / FILED / APPLIED SILENTLY ...
@@ -188,7 +203,7 @@ class ActionRow(BaseModel):
 
 
 LeafBlock = Annotated[
-    Union[TextBlock, InsightCard, StatRow, ImageCard, ListBlock, ImageGrid, OutfitCard, AgentCard, AgentGrid, DraftCard, Timeline, MeterRow, ActionRow],
+    Union[TextBlock, InsightCard, StatRow, ImageCard, ListBlock, ImageGrid, OutfitCard, AgentCard, AgentGrid, DraftCard, Timeline, MeterRow, BarChart, ActionRow],
     Field(discriminator="type"),
 ]
 

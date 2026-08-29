@@ -124,6 +124,19 @@ export type DraftCard = {
   why_detail?: string | null;
 };
 
+export type Bar = {
+  label: string;
+  value: number;
+  accent?: boolean;
+};
+
+export type BarChart = {
+  type: "bar_chart";
+  bars: Bar[];
+  target?: number | null;
+  caption?: string | null;
+};
+
 export type Meter = {
   label: string;
   value: number;
@@ -161,7 +174,7 @@ export type ActionRow = {
   actions: Action[];
 };
 
-export type LeafBlock = TextBlock | InsightCard | StatRow | ImageCard | ListBlock | ImageGrid | OutfitCard | AgentCard | AgentGrid | DraftCard | Timeline | MeterRow | ActionRow;
+export type LeafBlock = TextBlock | InsightCard | StatRow | ImageCard | ListBlock | ImageGrid | OutfitCard | AgentCard | AgentGrid | DraftCard | Timeline | MeterRow | BarChart | ActionRow;
 
 export type Section = {
   type: "section";

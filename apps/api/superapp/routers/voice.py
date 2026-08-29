@@ -57,6 +57,9 @@ CONVERSE_SYSTEM = (
     "no exceptions.\n"
     "recently_sent in context is the record of what YOU sent for them — "
     "when they ask what was sent, answer from it concretely (who, what, when).\n"
+    "They log water by voice ('log a glass of water', 'I drank a bottle'): "
+    "action=log_water, reply_body carries the millilitres as digits (glass "
+    "~250, bottle ~500).\n"
     "NUTRITION SETUP: when they want a meal/calorie plan (or ask to set up "
     "nutrition), collect conversationally — sex, birth year, height, weight, "
     "workouts per week (map to activity: limited/moderate/athlete), and goal "
@@ -81,7 +84,7 @@ CONVERSE_SCHEMA = {
         "action_type": {"type": "string",
                         "enum": ["none", "open_screen", "refresh_inbox", "start_interview",
                                  "draft_reply", "send_draft", "send_new_email",
-                                 "set_nutrition", "end_conversation"]},
+                                 "set_nutrition", "log_water", "end_conversation"]},
         "screen": {"type": "string", "enum": ["hub", "inbox", "home", "finance", "stylist", ""]},
         "draft_id": {"type": "string"},
         "message_id": {"type": "string"},
@@ -202,6 +205,14 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
                        value=plan, confidence=1.0, source_agent="orb")
             append_event(db, user_id=user_id, type="nutrition_plan_set", agent="orb",
                          domain="nutrition", payload=plan)
+        return {}
+    if action == "log_water":
+        try:
+            ml = max(50, min(2000, int(float(parsed.get("reply_body") or 250))))
+        except ValueError:
+            ml = 250
+        append_event(db, user_id=user_id, type="water_logged", agent="orb",
+                     domain="nutrition", payload={"ml": ml, "via": "voice"})
         return {}
     if action == "send_new_email" and parsed.get("to_addr") and parsed.get("reply_body"):
         settings = get_settings()
@@ -327,7 +338,7 @@ def converse(body: ConverseBody, user_id: str = Depends(current_user_id),
         "say": parsed["say"], "action": parsed["action_type"],
         "screen": parsed.get("screen", ""), "listen": parsed.get("listen", False),
         "acted": parsed["action_type"] in ("draft_reply", "send_draft", "send_new_email",
-                                           "set_nutrition"),
+                                           "set_nutrition", "log_water"),
     }
 
 

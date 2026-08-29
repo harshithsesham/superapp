@@ -673,7 +673,7 @@ def test_nutrition_plan_from_voice_profile():
     blocks = [b for sec in screen["sections"] for b in sec["blocks"]]
     hero = next(b for b in blocks if b["type"] == "text" and "calories left" in b["text"])
     meters = next(b for b in blocks if b["type"] == "meter_row")
-    assert {m["label"] for m in meters["meters"]} == {"PROTEIN", "CARBS", "FAT"}
+    assert {m["label"] for m in meters["meters"]} == {"PROTEIN", "CARBS", "FAT", "WATER"}
     assert hero["variant"] == "title"
 
 

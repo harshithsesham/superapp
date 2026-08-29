@@ -74,6 +74,35 @@ def set_target(
     return {"ok": True, "kcal": body.kcal}
 
 
+class WaterLog(BaseModel):
+    ml: int = Field(default=250, ge=50, le=2000)
+
+
+@router.post("/nutrition/water")
+def log_water(body: WaterLog, user_id: str = Depends(current_user_id),
+              db: Session = Depends(get_db)):
+    append_event(db, user_id=user_id, type="water_logged", agent="nutrition",
+                 domain="nutrition", payload={"ml": body.ml})
+    db.commit()
+    return render_screen(db, agent="nutrition", user_id=user_id).model_dump()
+
+
+class ActivitySync(BaseModel):
+    steps: int = Field(ge=0, le=200_000)
+    active_kcal: int = Field(default=0, ge=0, le=20_000)
+
+
+@router.post("/nutrition/activity")
+def sync_activity(body: ActivitySync, user_id: str = Depends(current_user_id),
+                  db: Session = Depends(get_db)):
+    """The phone reports HealthKit's day so far. Latest report wins."""
+    append_event(db, user_id=user_id, type="activity_synced", agent="nutrition",
+                 domain="nutrition", payload={"steps": body.steps,
+                                              "active_kcal": body.active_kcal})
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/media/{photo_id}")
 def get_media(photo_id: str, user_id: str = Depends(current_user_id)):
     try:

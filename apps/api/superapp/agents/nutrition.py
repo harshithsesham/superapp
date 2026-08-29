@@ -19,8 +19,8 @@ from sqlalchemy.orm import Session
 from .. import storage
 from ..llm.provider import LLMProvider
 from ..sdui.blocks import (
-    ImageCard, InsightCard, ListBlock, ListItem, Meter, MeterRow, Screen,
-    Section, Stat, StatRow, TextBlock,
+    Action, ActionRow, Bar, BarChart, ImageCard, InsightCard, ListBlock,
+    ListItem, Meter, MeterRow, Screen, Section, Stat, StatRow, TextBlock,
 )
 from ..substrate import ContextSlice, update_meal_estimate
 from .base import EventWrite, FactWrite, ThinkResult, register_agent
@@ -185,16 +185,29 @@ def nutrition_render(context: ContextSlice) -> Screen:
         # The Cal AI hero, in Nano's voice: what's LEFT, counted honestly.
         left = max(plan["kcal"] - today["kcal"], 0)
         blocks.append(TextBlock(text=f"{left:,} calories left.", variant="title"))
-        blocks.append(TextBlock(
-            text=f"{today['kcal']:,} of {plan['kcal']:,} eaten · plan: {plan.get('goal', 'maintain')}",
-            variant="caption"))
-        blocks.append(MeterRow(meters=[
+        streak = data.get("streak_days", 0)
+        activity = data.get("activity")
+        caption_bits = [f"{today['kcal']:,} of {plan['kcal']:,} eaten",
+                        f"plan: {plan.get('goal', 'maintain')}"]
+        if activity and activity.get("steps"):
+            caption_bits.append(f"{activity['steps']:,} steps · {activity.get('active_kcal', 0):,} kcal burned")
+        if streak >= 2:
+            caption_bits.append(f"{streak}-day streak")
+        blocks.append(TextBlock(text=" · ".join(caption_bits), variant="caption"))
+        meters = [
             Meter(label="PROTEIN", value=today.get("protein_g", 0) or 0,
                   max=plan["protein_g"], tone="rose"),
             Meter(label="CARBS", value=today.get("carbs_g", 0) or 0,
                   max=plan["carbs_g"], tone="amber"),
             Meter(label="FAT", value=today.get("fat_g", 0) or 0,
                   max=plan["fat_g"], tone="lavender"),
+        ]
+        if plan.get("water_ml"):
+            meters.append(Meter(label="WATER", value=today.get("water_ml", 0),
+                                max=plan["water_ml"], unit="ml", tone="mint"))
+        blocks.append(MeterRow(meters=meters))
+        blocks.append(ActionRow(actions=[
+            Action(id="nutrition.water", label="＋ Glass of water · 250ml", style="secondary")
         ]))
     else:
         stats = [Stat(label="Today", value=str(today["kcal"]), unit="kcal")]
@@ -228,6 +241,18 @@ def nutrition_render(context: ContextSlice) -> Screen:
             blocks.append(ImageCard(image_url=f"/v1/media/{last_photo}", title="Latest meal"))
     else:
         blocks.append(TextBlock(text="No meals logged today. Snap your next one.", variant="caption"))
+
+    week = data.get("week", [])
+    if any(d["kcal"] for d in week):
+        avg_days = [d for d in week if d["kcal"]]
+        avg = int(sum(d["kcal"] for d in avg_days) / max(len(avg_days), 1))
+        blocks.append(TextBlock(text=f"THIS WEEK · {avg:,} KCAL DAILY AVERAGE",
+                                variant="caption"))
+        blocks.append(BarChart(
+            bars=[Bar(label=d["day"], value=d["kcal"],
+                      accent=(d["date"] == today.get("date"))) for d in week],
+            target=float(plan["kcal"]) if plan else None,
+        ))
 
     if summary:
         blocks.append(

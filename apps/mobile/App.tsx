@@ -21,6 +21,11 @@ import {
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { ConversationProvider } from "@elevenlabs/react-native";
+import {
+  isHealthDataAvailable,
+  queryStatisticsForQuantity,
+  requestAuthorization as requestHealthAuthorization,
+} from "@kingstinct/react-native-healthkit";
 import { InterviewScreen } from "./src/InterviewScreen";
 import { NanoOrb } from "./src/NanoOrb";
 import { SduiScreen } from "./src/sdui/renderer";
@@ -182,6 +187,47 @@ function App() {
     if (cached) setLastTheme(cached.theme === "dark" ? "dark" : "light");
     load();
   }, [load, authState, screenName]);
+
+  // HealthKit: read today's steps + active energy, report to the server.
+  // Best-effort — denied permission or no data just means no activity line.
+  useEffect(() => {
+    if (authState !== "ready") return;
+    (async () => {
+      try {
+        if (!isHealthDataAvailable()) return;
+        const ok = await requestHealthAuthorization({
+          toRead: [
+            "HKQuantityTypeIdentifierStepCount",
+            "HKQuantityTypeIdentifierActiveEnergyBurned",
+          ],
+        });
+        if (!ok) return;
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        const filter = { date: { startDate: start, endDate: new Date() } };
+        const steps = await queryStatisticsForQuantity(
+          "HKQuantityTypeIdentifierStepCount",
+          ["cumulativeSum"],
+          { filter, unit: "count" }
+        );
+        const energy = await queryStatisticsForQuantity(
+          "HKQuantityTypeIdentifierActiveEnergyBurned",
+          ["cumulativeSum"],
+          { filter, unit: "kcal" }
+        );
+        await fetch(`${apiUrl}/v1/nutrition/activity`, {
+          method: "POST",
+          headers: { ...AUTH, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            steps: Math.round(steps.sumQuantity?.quantity ?? 0),
+            active_kcal: Math.round(energy.sumQuantity?.quantity ?? 0),
+          }),
+        });
+      } catch {
+        // no HealthKit in this environment; fine
+      }
+    })();
+  }, [authState]);
 
   // Push registration — direct APNs (no Expo services): the raw device token
   // goes to our server, which signs its own pushes with the .p8 key.
@@ -352,6 +398,18 @@ function App() {
             }
             await load();
           })
+          .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+          .finally(() => setBusy(false));
+        return;
+      }
+      if (kind === "action_tapped" && targetId === "nutrition.water") {
+        setBusy(true);
+        fetch(`${apiUrl}/v1/nutrition/water`, {
+          method: "POST",
+          headers: { ...AUTH, "Content-Type": "application/json" },
+          body: JSON.stringify({ ml: 250 }),
+        })
+          .then((res) => applyScreen(res))
           .catch((e) => setError(e instanceof Error ? e.message : String(e)))
           .finally(() => setBusy(false));
         return;

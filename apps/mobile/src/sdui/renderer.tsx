@@ -568,6 +568,32 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
     case "timeline":
       return <TimelineView block={block} dark={dark} />;
 
+    case "bar_chart": {
+      const maxVal = Math.max(...block.bars.map((b) => b.value), block.target ?? 0, 1);
+      return (
+        <View style={[s.card, dark && dk.card, { paddingVertical: 16 }]}>
+          <View style={{ flexDirection: "row", alignItems: "flex-end", height: 96, gap: 8 }}>
+            {block.bars.map((b, i) => (
+              <View key={i} style={{ flex: 1, alignItems: "center" }}>
+                <View
+                  style={{
+                    alignSelf: "stretch",
+                    height: Math.max(3, Math.round((b.value / maxVal) * 84)),
+                    borderRadius: 3,
+                    backgroundColor: b.accent ? "#C7B8FF" : "rgba(199,184,255,0.28)",
+                  }}
+                />
+                <Text style={[mt.label, { marginTop: 6, fontSize: 9 }]}>{b.label.toUpperCase()}</Text>
+              </View>
+            ))}
+          </View>
+          {block.caption ? (
+            <Text style={[s.caption, dark && dk.caption, { marginTop: 10 }]}>{block.caption}</Text>
+          ) : null}
+        </View>
+      );
+    }
+
     case "meter_row":
       return (
         <View style={[s.card, dark && dk.card, { paddingVertical: 16 }]}>

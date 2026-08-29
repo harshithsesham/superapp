@@ -29,7 +29,7 @@ def compute_plan(profile: dict) -> dict | None:
     fat_g = round(kcal * 0.25 / 9)
     carbs_g = round((kcal - protein_g * 4 - fat_g * 9) / 4)
     return {"kcal": kcal, "protein_g": protein_g, "carbs_g": max(carbs_g, 0),
-            "fat_g": fat_g, "goal": goal}
+            "fat_g": fat_g, "water_ml": int(weight * 35), "goal": goal}
 
 
 def sanitize_profile(raw: dict) -> dict:

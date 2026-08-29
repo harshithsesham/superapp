@@ -6,7 +6,7 @@ from datetime import datetime, time, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import NutritionMeal
+from ..models import Event, NutritionMeal
 
 
 def create_meal(db: Session, *, user_id: str, source: str, description: str = "",
@@ -70,6 +70,45 @@ def meals_context(db: Session, user_id: str) -> dict:
         return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
     today = [m for m in meals if aware(m.logged_at) >= today_start]
+
+    # Water + device activity live in events (small daily records, not beliefs).
+    water_ml = sum(
+        e.payload.get("ml", 0) for e in db.scalars(
+            select(Event).where(Event.user_id == user_id, Event.type == "water_logged",
+                                Event.created_at >= today_start))
+    )
+    activity_event = db.scalar(
+        select(Event).where(Event.user_id == user_id, Event.type == "activity_synced",
+                            Event.created_at >= today_start)
+        .order_by(Event.created_at.desc()))
+    activity = ({"steps": activity_event.payload.get("steps", 0),
+                 "active_kcal": activity_event.payload.get("active_kcal", 0)}
+                if activity_event else None)
+
+    # The week, day by day (last 7 including today), for the chart.
+    week = []
+    for d in range(6, -1, -1):
+        day0 = today_start - timedelta(days=d)
+        day1 = day0 + timedelta(days=1)
+        day_meals = [m for m in meals if day0 <= aware(m.logged_at) < day1]
+        week.append({"date": day0.date().isoformat(),
+                     "day": day0.strftime("%a"),
+                     "kcal": sum(m.kcal or 0 for m in day_meals),
+                     "meals": len(day_meals)})
+
+    # Streak: consecutive days with at least one meal, counting back from
+    # today (or yesterday, so a fresh morning doesn't read as a broken run).
+    logged_days = {aware(dt).date() for dt in db.scalars(
+        select(NutritionMeal.logged_at).where(NutritionMeal.user_id == user_id)
+        .order_by(NutritionMeal.logged_at.desc()).limit(400))}
+    streak = 0
+    cursor = now.date()
+    if cursor not in logged_days:
+        cursor = cursor - timedelta(days=1)
+    while cursor in logged_days:
+        streak += 1
+        cursor = cursor - timedelta(days=1)
+
     return {
         "today": {
             "date": now.date().isoformat(),
@@ -77,7 +116,11 @@ def meals_context(db: Session, user_id: str) -> dict:
             "protein_g": round(sum(m.protein_g or 0 for m in today), 1),
             "carbs_g": round(sum(m.carbs_g or 0 for m in today), 1),
             "fat_g": round(sum(m.fat_g or 0 for m in today), 1),
+            "water_ml": int(water_ml),
             "meals": [row(m) for m in today],
         },
+        "activity": activity,
+        "week": week,
+        "streak_days": streak,
         "recent_meals": [row(m) for m in meals],
     }

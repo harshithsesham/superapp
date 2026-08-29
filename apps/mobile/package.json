@@ -12,6 +12,7 @@
     "@expo-google-fonts/instrument-sans": "^0.4.2",
     "@expo-google-fonts/instrument-serif": "^0.4.1",
     "@expo-google-fonts/jetbrains-mono": "^0.4.1",
+    "@kingstinct/react-native-healthkit": "^14.1.0",
     "@livekit/react-native": "^2.12.0",
     "@livekit/react-native-webrtc": "^144.1.2",
     "expo": "^54.0.37",

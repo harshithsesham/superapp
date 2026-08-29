@@ -201,6 +201,76 @@
       "title": "AgentStat",
       "type": "object"
     },
+    "Bar": {
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "accent": {
+          "default": false,
+          "title": "Accent",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "title": "Bar",
+      "type": "object"
+    },
+    "BarChart": {
+      "description": "Small history chart \u2014 bars scaled to max, one accent bar.",
+      "properties": {
+        "type": {
+          "const": "bar_chart",
+          "default": "bar_chart",
+          "title": "Type",
+          "type": "string"
+        },
+        "bars": {
+          "items": {
+            "$ref": "#/$defs/Bar"
+          },
+          "title": "Bars",
+          "type": "array"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target"
+        },
+        "caption": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caption"
+        }
+      },
+      "required": [
+        "bars"
+      ],
+      "title": "BarChart",
+      "type": "object"
+    },
     "DraftCard": {
       "description": "A reply written and waiting (the Nano inbox). The client owns the feel:\ninline editing, optimistic send, defer. id is the draft id; the client\ncalls the draft endpoints and logs reactions.",
       "properties": {
@@ -706,6 +776,7 @@
                 "action_row": "#/$defs/ActionRow",
                 "agent_card": "#/$defs/AgentCard",
                 "agent_grid": "#/$defs/AgentGrid",
+                "bar_chart": "#/$defs/BarChart",
                 "draft_card": "#/$defs/DraftCard",
                 "image_card": "#/$defs/ImageCard",
                 "image_grid": "#/$defs/ImageGrid",
@@ -755,6 +826,9 @@
               },
               {
                 "$ref": "#/$defs/MeterRow"
+              },
+              {
+                "$ref": "#/$defs/BarChart"
               },
               {
                 "$ref": "#/$defs/ActionRow"
