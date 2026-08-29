@@ -168,7 +168,7 @@ def finance_render(context: ContextSlice) -> Screen:
     accounts = data.get("accounts", [])
 
     if not accounts:
-        return Screen(title="Finance", sections=[Section(title="Get started", blocks=[
+        return Screen(title="Finance", theme="dark", sections=[Section(title="Get started", blocks=[
             TextBlock(text="Link a bank to pull transactions in automatically."),
             ActionRow(actions=[Action(id="finance.link", label="Link bank")]),
         ])])
@@ -212,7 +212,7 @@ def finance_render(context: ContextSlice) -> Screen:
             for t in txns
         ]))
 
-    return Screen(title="Finance", sections=[Section(title="This month", blocks=blocks)])
+    return Screen(title="Finance", theme="dark", sections=[Section(title="This month", blocks=blocks)])
 
 
 register_agent("finance", render=finance_render, think=finance_think)

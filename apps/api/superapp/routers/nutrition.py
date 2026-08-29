@@ -103,6 +103,33 @@ def sync_activity(body: ActivitySync, user_id: str = Depends(current_user_id),
     return {"ok": True}
 
 
+class MealFix(BaseModel):
+    note: str = Field(min_length=3, max_length=500)
+
+
+@router.post("/nutrition/meals/{meal_id}/fix")
+def fix_meal_route(meal_id: str, body: MealFix, user_id: str = Depends(current_user_id),
+                   db: Session = Depends(get_db)):
+    """Cal Neo's ✦ Fix: 'the biryani was mutton, not veg' -> re-estimate."""
+    from sqlalchemy import select
+
+    from ..agents.nutrition import fix_meal
+    from ..models import NutritionMeal
+
+    meal = db.scalar(select(NutritionMeal).where(
+        NutritionMeal.id == meal_id, NutritionMeal.user_id == user_id))
+    if meal is None:
+        raise HTTPException(status_code=404, detail="No such meal")
+    original = {"description": meal.description, "kcal": meal.kcal or 0,
+                "protein_g": meal.protein_g or 0, "carbs_g": meal.carbs_g or 0,
+                "fat_g": meal.fat_g or 0, "confidence": meal.confidence}
+    fix_meal(db, user_id=user_id, meal_id=meal_id, note=body.note, original=original)
+    append_event(db, user_id=user_id, type="meal_fixed", agent="nutrition",
+                 domain="nutrition", payload={"meal_id": meal_id, "note": body.note[:200]})
+    db.commit()
+    return render_screen(db, agent="nutrition", user_id=user_id).model_dump()
+
+
 @router.get("/media/{photo_id}")
 def get_media(photo_id: str, user_id: str = Depends(current_user_id)):
     try:

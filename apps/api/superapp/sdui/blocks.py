@@ -53,6 +53,8 @@ class ListItem(BaseModel):
     subtitle: str | None = None
     trailing: str | None = None  # e.g. an amount or a time
     detail: str | None = None  # tap to expand — the full content (email body, ...)
+    tile: str | None = None  # letter tile (Cal Neo meal rows)
+    fixable_id: str | None = None  # expanded rows offer "✦ Fix" posting to this id
 
 
 class ListBlock(BaseModel):
@@ -144,6 +146,33 @@ class MeterRow(BaseModel):
     meters: list[Meter]
 
 
+class StripDay(BaseModel):
+    letter: str  # "M"
+    num: str  # "24"
+    logged: bool = False  # a dot under days that have at least one entry
+    today: bool = False
+
+
+class DayStrip(BaseModel):
+    """Cal Neo's week header: seven mono cells, today lit, logged days dotted."""
+
+    type: Literal["day_strip"] = "day_strip"
+    days: list[StripDay]
+    chip: str | None = None  # "DAY 14"
+
+
+class RingHero(BaseModel):
+    """The Cal Neo hero: a serif number, a mono label, macro chips, and a
+    progress ring ("48% EATEN")."""
+
+    type: Literal["ring_hero"] = "ring_hero"
+    big: str  # "1,150"
+    label: str  # "KCAL LEFT OF 2,200"
+    chips: list[str] = []  # ["P 90g", "C 141g", "F 18g"]
+    pct: float = 0.0  # 0..1 ring fill
+    pct_label: str = ""  # "EATEN"
+
+
 class Bar(BaseModel):
     label: str  # "Mon"
     value: float
@@ -203,7 +232,7 @@ class ActionRow(BaseModel):
 
 
 LeafBlock = Annotated[
-    Union[TextBlock, InsightCard, StatRow, ImageCard, ListBlock, ImageGrid, OutfitCard, AgentCard, AgentGrid, DraftCard, Timeline, MeterRow, BarChart, ActionRow],
+    Union[TextBlock, InsightCard, StatRow, ImageCard, ListBlock, ImageGrid, OutfitCard, AgentCard, AgentGrid, DraftCard, Timeline, MeterRow, BarChart, DayStrip, RingHero, ActionRow],
     Field(discriminator="type"),
 ]
 

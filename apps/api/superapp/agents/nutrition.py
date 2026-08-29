@@ -19,8 +19,9 @@ from sqlalchemy.orm import Session
 from .. import storage
 from ..llm.provider import LLMProvider
 from ..sdui.blocks import (
-    Action, ActionRow, Bar, BarChart, ImageCard, InsightCard, ListBlock,
-    ListItem, Meter, MeterRow, Screen, Section, Stat, StatRow, TextBlock,
+    Action, ActionRow, Bar, BarChart, DayStrip, ImageCard, InsightCard,
+    ListBlock, ListItem, Meter, MeterRow, RingHero, Screen, Section, Stat,
+    StatRow, StripDay, TextBlock,
 )
 from ..substrate import ContextSlice, update_meal_estimate
 from .base import EventWrite, FactWrite, ThinkResult, register_agent
@@ -163,6 +164,46 @@ def _daily_summary(db: Session, context: ContextSlice, trigger: dict) -> ThinkRe
     )
 
 
+FIX_SYSTEM = (
+    "You are the nutrition agent. The user corrected your estimate of a meal. "
+    "Re-estimate the SAME portion with their correction applied. Keep what "
+    "they didn't dispute close to the original. confidence is 0..1."
+)
+
+
+def fix_meal(db: Session, *, user_id: str, meal_id: str, note: str,
+             original: dict) -> dict:
+    provider = LLMProvider()
+    resp = provider.complete(
+        db, user_id=user_id, agent="nutrition", task="estimate",
+        system=FIX_SYSTEM,
+        prompt=json.dumps({"original_estimate": original, "user_correction": note},
+                          sort_keys=True),
+        schema=MEAL_SCHEMA,
+    )
+    estimate = dict(original, confidence=max(original.get("confidence", 0.5), 0.5))
+    if not resp.stubbed and not resp.refused:
+        try:
+            parsed = json.loads(resp.text)
+            if all(k in parsed for k in MEAL_SCHEMA["required"]):
+                estimate = parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+    elif resp.stubbed:
+        estimate = dict(original, description=f"{original.get('description', 'Meal')} (fixed)",
+                        confidence=0.6)
+    update_meal_estimate(
+        db, user_id=user_id, meal_id=meal_id,
+        description=str(estimate["description"])[:500],
+        kcal=int(estimate["kcal"]),
+        protein_g=float(estimate["protein_g"]),
+        carbs_g=float(estimate["carbs_g"]),
+        fat_g=float(estimate["fat_g"]),
+        confidence=float(estimate["confidence"]),
+    )
+    return estimate
+
+
 def nutrition_think(db: Session, *, trigger: dict, context: ContextSlice, run_id: str) -> ThinkResult:
     if trigger.get("kind") in ("meal_photo", "meal_text"):
         return _estimate_meal(db, context, trigger)
@@ -181,34 +222,36 @@ def nutrition_render(context: ContextSlice) -> Screen:
     plan = _plan(context)
     blocks: list = []
 
+    week = data.get("week", [])
+    streak = data.get("streak_days", 0)
+    if week:
+        blocks.append(DayStrip(
+            days=[StripDay(letter=d["day"][0], num=d["date"][-2:].lstrip("0"),
+                           logged=d["meals"] > 0,
+                           today=d["date"] == today.get("date"))
+                  for d in week],
+            chip=f"DAY {streak}" if streak >= 1 else None,
+        ))
+
     if plan:
-        # The Cal AI hero, in Nano's voice: what's LEFT, counted honestly.
+        # The Cal Neo hero: serif number, mono label, macro chips, eaten ring.
         left = max(plan["kcal"] - today["kcal"], 0)
-        blocks.append(TextBlock(text=f"{left:,} calories left.", variant="title"))
-        streak = data.get("streak_days", 0)
+        eaten_pct = min(today["kcal"] / plan["kcal"], 1.0) if plan["kcal"] else 0.0
+        p_left = max(plan["protein_g"] - (today.get("protein_g", 0) or 0), 0)
+        c_left = max(plan["carbs_g"] - (today.get("carbs_g", 0) or 0), 0)
+        f_left = max(plan["fat_g"] - (today.get("fat_g", 0) or 0), 0)
+        blocks.append(RingHero(
+            big=f"{left:,}",
+            label=f"KCAL LEFT OF {plan['kcal']:,}",
+            chips=[f"P {p_left:g}g", f"C {c_left:g}g", f"F {f_left:g}g"],
+            pct=round(eaten_pct, 3),
+            pct_label="EATEN",
+        ))
         activity = data.get("activity")
-        caption_bits = [f"{today['kcal']:,} of {plan['kcal']:,} eaten",
-                        f"plan: {plan.get('goal', 'maintain')}"]
         if activity and activity.get("steps"):
-            caption_bits.append(f"{activity['steps']:,} steps · {activity.get('active_kcal', 0):,} kcal burned")
-        if streak >= 2:
-            caption_bits.append(f"{streak}-day streak")
-        blocks.append(TextBlock(text=" · ".join(caption_bits), variant="caption"))
-        meters = [
-            Meter(label="PROTEIN", value=today.get("protein_g", 0) or 0,
-                  max=plan["protein_g"], tone="rose"),
-            Meter(label="CARBS", value=today.get("carbs_g", 0) or 0,
-                  max=plan["carbs_g"], tone="amber"),
-            Meter(label="FAT", value=today.get("fat_g", 0) or 0,
-                  max=plan["fat_g"], tone="lavender"),
-        ]
-        if plan.get("water_ml"):
-            meters.append(Meter(label="WATER", value=today.get("water_ml", 0),
-                                max=plan["water_ml"], unit="ml", tone="mint"))
-        blocks.append(MeterRow(meters=meters))
-        blocks.append(ActionRow(actions=[
-            Action(id="nutrition.water", label="＋ Glass of water · 250ml", style="secondary")
-        ]))
+            blocks.append(TextBlock(
+                text=f"{activity['steps']:,} steps · {activity.get('active_kcal', 0):,} kcal burned",
+                variant="caption"))
     else:
         stats = [Stat(label="Today", value=str(today["kcal"]), unit="kcal")]
         if target:
@@ -219,18 +262,22 @@ def nutrition_render(context: ContextSlice) -> Screen:
             text="Tap the orb — one minute of talking and I'll build your daily plan.",
             variant="caption"))
 
+    blocks.append(TextBlock(text=f"TODAY · {len(today['meals'])} LOGGED", variant="caption"))
     if today["meals"]:
         blocks.append(
             ListBlock(
                 items=[
                     ListItem(
                         id=m["id"],
-                        title=m["description"] or m["source"],
-                        subtitle=f"{m['protein_g'] or 0:g}g P · {m['carbs_g'] or 0:g}g C · {m['fat_g'] or 0:g}g F",
-                        trailing=f"{m['kcal'] or '…'} kcal",
+                        title=(m["description"] or m["source"])[:60],
+                        tile=((m["description"] or "M")[0] or "M").upper(),
+                        subtitle=f"{m['kcal'] or '…'} kcal  P {m['protein_g'] or 0:g}g  "
+                                 f"C {m['carbs_g'] or 0:g}g  F {m['fat_g'] or 0:g}g",
+                        trailing=m["logged_at"][11:16],
                         detail=(f"{m['description']}\n\n{m['kcal'] or '?'} kcal — "
                                 f"protein {m['protein_g'] or 0:g}g, carbs {m['carbs_g'] or 0:g}g, "
                                 f"fat {m['fat_g'] or 0:g}g."),
+                        fixable_id=m["id"],
                     )
                     for m in today["meals"]
                 ]
@@ -238,11 +285,19 @@ def nutrition_render(context: ContextSlice) -> Screen:
         )
         last_photo = next((m["photo_id"] for m in today["meals"] if m["photo_id"]), None)
         if last_photo:
-            blocks.append(ImageCard(image_url=f"/v1/media/{last_photo}", title="Latest meal"))
+            blocks.append(ImageCard(image_url=f"/v1/media/{last_photo}", title="Latest plate"))
     else:
-        blocks.append(TextBlock(text="No meals logged today. Snap your next one.", variant="caption"))
+        blocks.append(TextBlock(text="Nothing yet. Snap your first plate.", variant="caption"))
+    blocks.append(ActionRow(actions=[
+        Action(id="nutrition.photo", label="Snap the plate"),
+        Action(id="nutrition.water", label="＋ Water", style="secondary"),
+    ]))
+    if plan and plan.get("water_ml"):
+        blocks.append(MeterRow(meters=[
+            Meter(label="WATER", value=today.get("water_ml", 0),
+                  max=plan["water_ml"], unit="ml", tone="mint"),
+        ]))
 
-    week = data.get("week", [])
     if any(d["kcal"] for d in week):
         avg_days = [d for d in week if d["kcal"]]
         avg = int(sum(d["kcal"] for d in avg_days) / max(len(avg_days), 1))
@@ -265,7 +320,7 @@ def nutrition_render(context: ContextSlice) -> Screen:
             )
         )
 
-    return Screen(title="Nutrition", sections=[Section(title="Today", blocks=blocks)])
+    return Screen(title="Nutrition", theme="dark", sections=[Section(title=None, blocks=blocks)])
 
 
 register_agent("nutrition", render=nutrition_render, think=nutrition_think)

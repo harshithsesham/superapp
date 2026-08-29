@@ -4,6 +4,7 @@
 import React, { useState } from "react";
 import { Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import Svg, { Circle } from "react-native-svg";
 import type { LeafBlock, Screen, Section } from "./types";
 
 type ReactionFn = (kind: string, targetId: string, agent?: string) => void;
@@ -24,6 +25,7 @@ type RenderCtx = {
   media?: MediaCtx;
   onDraftAction?: DraftActionFn;
   onNavigate?: NavigateFn;
+  onFix?: (id: string) => void;
   dark?: boolean;
 };
 
@@ -33,15 +35,17 @@ export function SduiScreen({
   media,
   onDraftAction,
   onNavigate,
+  onFix,
 }: {
   screen: Screen;
   onReaction: ReactionFn;
   media?: MediaCtx;
   onDraftAction?: DraftActionFn;
   onNavigate?: NavigateFn;
+  onFix?: (id: string) => void;
 }) {
   const dark = screen.theme === "dark";
-  const ctx: RenderCtx = { onReaction, media, onDraftAction, onNavigate, dark };
+  const ctx: RenderCtx = { onReaction, media, onDraftAction, onNavigate, onFix, dark };
   return (
     <View>
       <Text style={[s.screenTitle, dark && dk.screenTitle]}>{screen.title}</Text>
@@ -280,19 +284,36 @@ function DraftCardView({
 function ExpandableRow({
   item,
   dark,
+  onFix,
 }: {
-  item: { id: string; title: string; subtitle?: string | null; trailing?: string | null; detail?: string | null };
+  item: {
+    id: string;
+    title: string;
+    subtitle?: string | null;
+    trailing?: string | null;
+    detail?: string | null;
+    tile?: string | null;
+    fixable_id?: string | null;
+  };
   dark?: boolean;
+  onFix?: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const readable = !!item.detail;
   return (
     <Pressable onPress={readable ? () => setOpen((v) => !v) : undefined}>
       <View style={s.listItem}>
+        {item.tile ? (
+          <View style={cn.tile}>
+            <Text style={cn.tileText}>{item.tile}</Text>
+          </View>
+        ) : null}
         <View style={{ flex: 1 }}>
           <Text style={[s.body, dark && dk.ink]}>{item.title}</Text>
           {item.subtitle ? (
-            <Text style={[s.caption, dark && dk.caption]}>{item.subtitle}</Text>
+            <Text style={[s.caption, dark && dk.caption, item.tile ? dk.mono : null]}>
+              {item.subtitle}
+            </Text>
           ) : null}
         </View>
         {item.trailing ? (
@@ -302,13 +323,118 @@ function ExpandableRow({
         ) : null}
       </View>
       {open && item.detail ? (
-        <Text style={[s.caption, dark && dk.caption, { paddingBottom: 12, lineHeight: 19 }]}>
-          {item.detail}
-        </Text>
+        <View style={{ paddingBottom: 12 }}>
+          <Text style={[s.caption, dark && dk.caption, { lineHeight: 19 }]}>{item.detail}</Text>
+          {item.fixable_id && onFix ? (
+            <Pressable onPress={() => onFix(item.fixable_id as string)} hitSlop={8}>
+              <Text style={cn.fixLink}>✦ FIX THIS ESTIMATE</Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : null}
     </Pressable>
   );
 }
+
+const cn = StyleSheet.create({
+  chip: {
+    fontFamily: "JetBrainsMono_400Regular",
+    fontSize: 10,
+    letterSpacing: 2,
+    color: "#C7B8FF",
+  },
+  dayCell: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: "#14101F",
+    borderWidth: 1,
+    borderColor: "rgba(199,184,255,0.08)",
+  },
+  dayCellToday: {
+    backgroundColor: "#221B3A",
+    borderColor: "rgba(199,184,255,0.45)",
+  },
+  dayLetter: {
+    fontFamily: "JetBrainsMono_400Regular",
+    fontSize: 8,
+    color: "#8A87A3",
+  },
+  dayNum: {
+    fontFamily: "JetBrainsMono_400Regular",
+    fontSize: 13,
+    color: "#B9B4CC",
+    marginTop: 2,
+  },
+  dayTextToday: { color: "#E9E4FF" },
+  dayDot: {
+    width: 10,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: "#8B7CF6",
+    marginTop: 4,
+  },
+  heroCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "rgba(199,184,255,0.16)",
+    padding: 18,
+    marginTop: 12,
+  },
+  heroBig: {
+    fontFamily: "InstrumentSerif_400Regular",
+    fontSize: 44,
+    color: "#F4F2FA",
+    lineHeight: 48,
+  },
+  heroLabel: {
+    fontFamily: "JetBrainsMono_400Regular",
+    fontSize: 10,
+    letterSpacing: 1.8,
+    color: "#8A87A3",
+    marginTop: 2,
+  },
+  heroChip: {
+    fontFamily: "JetBrainsMono_400Regular",
+    fontSize: 11,
+    color: "#B9B4CC",
+  },
+  ringPct: {
+    fontFamily: "InstrumentSerif_400Regular",
+    fontSize: 18,
+    color: "#F4F2FA",
+  },
+  ringLabel: {
+    fontFamily: "JetBrainsMono_400Regular",
+    fontSize: 7,
+    letterSpacing: 1.5,
+    color: "#8A87A3",
+  },
+  tile: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: "#2A2050",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  tileText: {
+    fontFamily: "InstrumentSerif_400Regular",
+    fontSize: 16,
+    color: "#C7B8FF",
+  },
+  fixLink: {
+    fontFamily: "JetBrainsMono_400Regular",
+    fontSize: 10,
+    letterSpacing: 1.6,
+    color: "#C7B8FF",
+    paddingVertical: 8,
+  },
+});
 
 const METER_TONES: Record<string, string> = {
   mint: "#7CF7C4",
@@ -459,7 +585,7 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
       return (
         <View style={[s.card, dark && dk.card]}>
           {block.items.map((item) => (
-            <ExpandableRow key={item.id} item={item} dark={dark} />
+            <ExpandableRow key={item.id} item={item} dark={dark} onFix={ctx.onFix} />
           ))}
         </View>
       );
@@ -567,6 +693,68 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
 
     case "timeline":
       return <TimelineView block={block} dark={dark} />;
+
+    case "day_strip":
+      return (
+        <View>
+          {block.chip ? (
+            <Text style={[cn.chip, { alignSelf: "flex-end", marginBottom: 8 }]}>● {block.chip}</Text>
+          ) : null}
+          <View style={{ flexDirection: "row", gap: 6 }}>
+            {block.days.map((d, i) => (
+              <View key={i} style={[cn.dayCell, d.today && cn.dayCellToday]}>
+                <Text style={[cn.dayLetter, d.today && cn.dayTextToday]}>{d.letter}</Text>
+                <Text style={[cn.dayNum, d.today && cn.dayTextToday]}>{d.num}</Text>
+                <View style={[cn.dayDot, { opacity: d.logged ? 1 : 0 }]} />
+              </View>
+            ))}
+          </View>
+        </View>
+      );
+
+    case "ring_hero": {
+      const R = 34;
+      const C = 2 * Math.PI * R;
+      const pct = Math.max(0, Math.min(1, block.pct ?? 0));
+      return (
+        <LinearGradient
+          colors={["#2A2050", "#140F26", "#08070E"]}
+          start={{ x: 0.2, y: 0 }}
+          end={{ x: 0.6, y: 1 }}
+          style={cn.heroCard}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={cn.heroBig}>{block.big}</Text>
+            <Text style={cn.heroLabel}>{block.label}</Text>
+            <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
+              {(block.chips ?? []).map((c, i) => (
+                <Text key={i} style={cn.heroChip}>{c}</Text>
+              ))}
+            </View>
+          </View>
+          <View style={{ width: 84, height: 84, alignItems: "center", justifyContent: "center" }}>
+            <Svg width={84} height={84} viewBox="0 0 84 84">
+              <Circle cx={42} cy={42} r={R} stroke="rgba(199,184,255,0.16)" strokeWidth={7} fill="none" />
+              <Circle
+                cx={42}
+                cy={42}
+                r={R}
+                stroke="#8B7CF6"
+                strokeWidth={7}
+                fill="none"
+                strokeLinecap="round"
+                strokeDasharray={`${C * pct} ${C}`}
+                transform="rotate(-90 42 42)"
+              />
+            </Svg>
+            <View style={{ position: "absolute", alignItems: "center" }}>
+              <Text style={cn.ringPct}>{Math.round(pct * 100)}%</Text>
+              {block.pct_label ? <Text style={cn.ringLabel}>{block.pct_label}</Text> : null}
+            </View>
+          </View>
+        </LinearGradient>
+      );
+    }
 
     case "bar_chart": {
       const maxVal = Math.max(...block.bars.map((b) => b.value), block.target ?? 0, 1);

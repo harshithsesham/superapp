@@ -11,6 +11,7 @@ import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -312,6 +313,31 @@ function App() {
     setAuthState("signin");
   }, []);
 
+  const onFixMeal = useCallback((mealId: string) => {
+    Alert.prompt(
+      "Fix this estimate",
+      "What's wrong? e.g. 'it was mutton, not veg' or 'half the portion'",
+      async (note) => {
+        if (!note?.trim()) return;
+        setBusy(true);
+        try {
+          setError(null);
+          await applyScreen(
+            await fetch(`${apiUrl}/v1/nutrition/meals/${mealId}/fix`, {
+              method: "POST",
+              headers: { ...AUTH, "Content-Type": "application/json" },
+              body: JSON.stringify({ note: note.trim() }),
+            })
+          );
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e));
+        } finally {
+          setBusy(false);
+        }
+      }
+    );
+  }, [applyScreen]);
+
   const onNavigate = useCallback((screen: string) => {
     if ((SCREENS as readonly string[]).includes(screen)) {
       setScreenName(screen as ScreenName);
@@ -400,6 +426,10 @@ function App() {
           })
           .catch((e) => setError(e instanceof Error ? e.message : String(e)))
           .finally(() => setBusy(false));
+        return;
+      }
+      if (kind === "action_tapped" && targetId === "nutrition.photo") {
+        uploadPhoto("/v1/nutrition/photo");
         return;
       }
       if (kind === "action_tapped" && targetId === "nutrition.water") {
@@ -529,6 +559,7 @@ function App() {
             media={{ baseUrl: apiUrl, headers: AUTH }}
             onDraftAction={onDraftAction}
             onNavigate={onNavigate}
+            onFix={onFixMeal}
           />
         ) : (
           <ActivityIndicator style={{ marginTop: 64 }} />

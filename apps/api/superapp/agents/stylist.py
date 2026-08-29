@@ -304,7 +304,7 @@ def stylist_render(context: ContextSlice) -> Screen:
     sections: list[Section] = []
 
     if not garments:
-        return Screen(title="Stylist", sections=[Section(title="Your closet", blocks=[
+        return Screen(title="Stylist", theme="dark", sections=[Section(title="Your closet", blocks=[
             TextBlock(text="Photograph a few garments to start getting outfits — "
                            "tops, bottoms, shoes.", variant="body"),
         ])])
@@ -355,7 +355,7 @@ def stylist_render(context: ContextSlice) -> Screen:
         closet_blocks.append(ImageGrid(items=grid_items, columns=3))
     sections.append(Section(title="Closet", blocks=closet_blocks))
 
-    return Screen(title="Stylist", sections=sections)
+    return Screen(title="Stylist", theme="dark", sections=sections)
 
 
 register_agent("stylist", render=stylist_render, think=stylist_think)

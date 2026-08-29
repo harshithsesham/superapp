@@ -119,7 +119,7 @@ def test_phase1_exit_criterion_meal_flow():
     ).json()
     blocks = screen["sections"][0]["blocks"]
     meals = next(b for b in blocks if b["type"] == "list")
-    assert "eggs" in meals["items"][0]["title"] and "kcal" in meals["items"][0]["trailing"]
+    assert "eggs" in meals["items"][0]["title"] and "kcal" in meals["items"][0]["subtitle"]
     stats = next(b for b in blocks if b["type"] == "stat_row")
     today = next(s for s in stats["stats"] if s["label"] == "Today")
     assert int(today["value"]) > 0  # stub estimate landed in the twin
@@ -668,13 +668,19 @@ def test_nutrition_plan_from_voice_profile():
     assert facts["plan"]["kcal"] > 2000 and facts["profile"]["weight_kg"] == 75
     db.close()
 
-    # ...and the nutrition screen turns into the calories-left hero with meters.
+    # ...and the nutrition screen becomes the Cal Neo layout: day strip,
+    # ring hero with macro chips, water meter, snap CTA.
     screen = client.get("/v1/screen/home", headers=AUTH).json()
     blocks = [b for sec in screen["sections"] for b in sec["blocks"]]
-    hero = next(b for b in blocks if b["type"] == "text" and "calories left" in b["text"])
+    hero = next(b for b in blocks if b["type"] == "ring_hero")
+    assert "KCAL LEFT OF" in hero["label"] and hero["pct_label"] == "EATEN"
+    assert len(hero["chips"]) == 3 and hero["chips"][0].startswith("P ")
+    strip = next(b for b in blocks if b["type"] == "day_strip")
+    assert len(strip["days"]) == 7 and sum(1 for d in strip["days"] if d["today"]) == 1
     meters = next(b for b in blocks if b["type"] == "meter_row")
-    assert {m["label"] for m in meters["meters"]} == {"PROTEIN", "CARBS", "FAT", "WATER"}
-    assert hero["variant"] == "title"
+    assert {m["label"] for m in meters["meters"]} == {"WATER"}
+    actions = next(b for b in blocks if b["type"] == "action_row")
+    assert any("Snap the plate" in a["label"] for a in actions["actions"])
 
 
 def test_draft_card_explains_why_it_wrote_this():

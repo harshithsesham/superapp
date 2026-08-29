@@ -271,6 +271,41 @@
       "title": "BarChart",
       "type": "object"
     },
+    "DayStrip": {
+      "description": "Cal Neo's week header: seven mono cells, today lit, logged days dotted.",
+      "properties": {
+        "type": {
+          "const": "day_strip",
+          "default": "day_strip",
+          "title": "Type",
+          "type": "string"
+        },
+        "days": {
+          "items": {
+            "$ref": "#/$defs/StripDay"
+          },
+          "title": "Days",
+          "type": "array"
+        },
+        "chip": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chip"
+        }
+      },
+      "required": [
+        "days"
+      ],
+      "title": "DayStrip",
+      "type": "object"
+    },
     "DraftCard": {
       "description": "A reply written and waiting (the Nano inbox). The client owns the feel:\ninline editing, optimistic send, defer. id is the draft id; the client\ncalls the draft endpoints and logs reactions.",
       "properties": {
@@ -593,6 +628,30 @@
           ],
           "default": null,
           "title": "Detail"
+        },
+        "tile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tile"
+        },
+        "fixable_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fixable Id"
         }
       },
       "required": [
@@ -749,6 +808,49 @@
       "title": "OutfitItem",
       "type": "object"
     },
+    "RingHero": {
+      "description": "The Cal Neo hero: a serif number, a mono label, macro chips, and a\nprogress ring (\"48% EATEN\").",
+      "properties": {
+        "type": {
+          "const": "ring_hero",
+          "default": "ring_hero",
+          "title": "Type",
+          "type": "string"
+        },
+        "big": {
+          "title": "Big",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "chips": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Chips",
+          "type": "array"
+        },
+        "pct": {
+          "default": 0.0,
+          "title": "Pct",
+          "type": "number"
+        },
+        "pct_label": {
+          "default": "",
+          "title": "Pct Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "big",
+        "label"
+      ],
+      "title": "RingHero",
+      "type": "object"
+    },
     "Section": {
       "properties": {
         "type": {
@@ -777,6 +879,7 @@
                 "agent_card": "#/$defs/AgentCard",
                 "agent_grid": "#/$defs/AgentGrid",
                 "bar_chart": "#/$defs/BarChart",
+                "day_strip": "#/$defs/DayStrip",
                 "draft_card": "#/$defs/DraftCard",
                 "image_card": "#/$defs/ImageCard",
                 "image_grid": "#/$defs/ImageGrid",
@@ -784,6 +887,7 @@
                 "list": "#/$defs/ListBlock",
                 "meter_row": "#/$defs/MeterRow",
                 "outfit_card": "#/$defs/OutfitCard",
+                "ring_hero": "#/$defs/RingHero",
                 "stat_row": "#/$defs/StatRow",
                 "text": "#/$defs/TextBlock",
                 "timeline": "#/$defs/Timeline"
@@ -829,6 +933,12 @@
               },
               {
                 "$ref": "#/$defs/BarChart"
+              },
+              {
+                "$ref": "#/$defs/DayStrip"
+              },
+              {
+                "$ref": "#/$defs/RingHero"
               },
               {
                 "$ref": "#/$defs/ActionRow"
@@ -909,6 +1019,34 @@
         "stats"
       ],
       "title": "StatRow",
+      "type": "object"
+    },
+    "StripDay": {
+      "properties": {
+        "letter": {
+          "title": "Letter",
+          "type": "string"
+        },
+        "num": {
+          "title": "Num",
+          "type": "string"
+        },
+        "logged": {
+          "default": false,
+          "title": "Logged",
+          "type": "boolean"
+        },
+        "today": {
+          "default": false,
+          "title": "Today",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "letter",
+        "num"
+      ],
+      "title": "StripDay",
       "type": "object"
     },
     "TextBlock": {

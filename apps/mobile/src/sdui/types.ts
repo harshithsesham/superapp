@@ -45,6 +45,8 @@ export type ListItem = {
   subtitle?: string | null;
   trailing?: string | null;
   detail?: string | null;
+  tile?: string | null;
+  fixable_id?: string | null;
 };
 
 export type ListBlock = {
@@ -124,6 +126,28 @@ export type DraftCard = {
   why_detail?: string | null;
 };
 
+export type StripDay = {
+  letter: string;
+  num: string;
+  logged?: boolean;
+  today?: boolean;
+};
+
+export type DayStrip = {
+  type: "day_strip";
+  days: StripDay[];
+  chip?: string | null;
+};
+
+export type RingHero = {
+  type: "ring_hero";
+  big: string;
+  label: string;
+  chips?: string[];
+  pct?: number;
+  pct_label?: string;
+};
+
 export type Bar = {
   label: string;
   value: number;
@@ -174,7 +198,7 @@ export type ActionRow = {
   actions: Action[];
 };
 
-export type LeafBlock = TextBlock | InsightCard | StatRow | ImageCard | ListBlock | ImageGrid | OutfitCard | AgentCard | AgentGrid | DraftCard | Timeline | MeterRow | BarChart | ActionRow;
+export type LeafBlock = TextBlock | InsightCard | StatRow | ImageCard | ListBlock | ImageGrid | OutfitCard | AgentCard | AgentGrid | DraftCard | Timeline | MeterRow | BarChart | DayStrip | RingHero | ActionRow;
 
 export type Section = {
   type: "section";
