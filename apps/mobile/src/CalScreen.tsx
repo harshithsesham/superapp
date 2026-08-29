@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -198,6 +199,8 @@ export function CalScreen({
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [openMeal, setOpenMeal] = useState<string | null>(null);
+  const [waterSheet, setWaterSheet] = useState(false);
+  const [waterAmt, setWaterAmt] = useState(0);
   const pagerRef = useRef<ScrollView>(null);
   const stripRef = useRef<ScrollView>(null);
 
@@ -481,7 +484,10 @@ export function CalScreen({
               <View style={[s.healthTrack, { marginTop: 12 }]}>
                 <View style={{ height: 4, borderRadius: 2, backgroundColor: C.mint, width: `${Math.min((t.water_ml / plan.water_ml) * 100, 100)}%` }} />
               </View>
-              <Pressable onPress={() => post("/v1/nutrition/water", { ml: 250 })} style={s.smallBtn}>
+              <Pressable onPress={() => {
+                setWaterAmt(0);
+                setWaterSheet(true);
+              }} style={s.smallBtn}>
                 <Text style={s.smallBtnText}>Log water</Text>
               </Pressable>
             </View>
@@ -528,11 +534,53 @@ export function CalScreen({
       </ScrollView>
 
       <View style={s.ctaBar}>
-        <GradientButton icon="📷" label={busy ? "Working…" : "Snap the plate"} onPress={snapPlate} />
+        <GradientButton label={busy ? "Working…" : "Snap the plate"} onPress={snapPlate} />
         <Pressable onPress={logText} style={s.scanBtn} hitSlop={8}>
           <Text style={{ color: C.body, fontSize: 15 }}>✎</Text>
         </Pressable>
       </View>
+
+      <Modal visible={waterSheet} transparent animationType="slide"
+        onRequestClose={() => setWaterSheet(false)}>
+        <Pressable style={s.sheetBackdrop} onPress={() => setWaterSheet(false)} />
+        <View style={s.sheet}>
+          <Text style={s.monoLabel}>LOG WATER</Text>
+          <Text style={s.sheetAmount}>
+            {waterAmt}
+            <Text style={{ fontSize: 14, color: C.dim }}>  mL</Text>
+          </Text>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
+            {[
+              { label: "+1 Glass", ml: 250, h: 16 },
+              { label: "+1 Bottle", ml: 500, h: 22 },
+              { label: "+1 Large", ml: 750, h: 26 },
+            ].map((o) => (
+              <Pressable key={o.ml} onPress={() => setWaterAmt(waterAmt + o.ml)} style={s.waterOpt}>
+                <View style={[s.bottleGlyph, { height: o.h }]} />
+                <Text style={s.waterOptLabel}>{o.label}</Text>
+                <Text style={s.waterOptMl}>{o.ml} mL</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={{ flexDirection: "row", gap: 10, marginTop: 16 }}>
+            <Pressable onPress={() => setWaterAmt(0)} style={[s.smallBtn, { flex: 1, marginTop: 0, paddingVertical: 13 }]}>
+              <Text style={s.smallBtnText}>Clear</Text>
+            </Pressable>
+            <View style={{ flex: 1.4 }}>
+              <GradientButton
+                label="Log it"
+                onPress={async () => {
+                  if (waterAmt > 0) {
+                    await post("/v1/nutrition/water", { ml: Math.min(waterAmt, 2000) });
+                    say(`${waterAmt} mL down.`);
+                  }
+                  setWaterSheet(false);
+                }}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {toast ? (
         <View style={s.toast}>
@@ -925,6 +973,34 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 11,
   },
+  sheetBackdrop: { flex: 1, backgroundColor: "rgba(4,3,9,0.72)" },
+  sheet: {
+    backgroundColor: "#131022",
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    borderWidth: 1,
+    borderColor: C.line,
+    padding: 20,
+    paddingBottom: 34,
+  },
+  sheetAmount: { fontFamily: "InstrumentSerif_400Regular", fontSize: 42, color: C.ink, marginTop: 8 },
+  waterOpt: {
+    flex: 1,
+    alignItems: "center",
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: "rgba(199,184,255,0.12)",
+    borderRadius: 14,
+    paddingVertical: 14,
+  },
+  bottleGlyph: {
+    width: 11,
+    borderWidth: 1.5,
+    borderColor: C.lav,
+    borderRadius: 4,
+  },
+  waterOptLabel: { color: C.ink, fontSize: 12.5, fontWeight: "600", marginTop: 8 },
+  waterOptMl: { fontFamily: "JetBrainsMono_400Regular", fontSize: 9.5, color: C.dim, marginTop: 3 },
   // onboarding
   obProgress: { flexDirection: "row", gap: 6, paddingHorizontal: 18, paddingTop: 10 },
   obSeg: { flex: 1, height: 2.5, borderRadius: 2, backgroundColor: "rgba(199,184,255,0.15)" },
