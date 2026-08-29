@@ -41,12 +41,22 @@ def link_sandbox(user_id: str = Depends(current_user_id), db: Session = Depends(
                           institution="Sandbox Bank" if not client.stubbed else "Stub Bank")
 
 
+# Hosted-link sessions awaiting completion: link_token -> user_id.
+# Single-worker deployment; a restart mid-link just means relinking.
+_pending_links: dict[str, str] = {}
+
+
 @router.post("/finance/link/hosted")
 def link_hosted(request: Request, user_id: str = Depends(current_user_id),
                 db: Session = Depends(get_db)):
     settings = get_settings()
-    webhook_url = str(request.base_url).rstrip("/") + f"/v1/plaid/webhook/{settings.plaid_webhook_token}"
-    return {"hosted_link_url": PlaidClient().hosted_link_url(user_id=user_id, webhook_url=webhook_url)}
+    client = PlaidClient()
+    if client.stubbed:
+        raise HTTPException(status_code=503, detail="Plaid not configured; use sandbox link")
+    webhook_url = "https://app.nutrishiksha.com" + f"/v1/plaid/webhook/{settings.plaid_webhook_token}"
+    url, link_token = client.hosted_link_url(user_id=user_id, webhook_url=webhook_url)
+    _pending_links[link_token] = user_id
+    return {"hosted_link_url": url}
 
 
 class PublicTokenExchange(BaseModel):
@@ -90,6 +100,16 @@ async def plaid_webhook(token: str, request: Request, db: Session = Depends(get_
     if token != settings.plaid_webhook_token:
         raise HTTPException(status_code=403, detail="Bad webhook token")
     payload = await request.json()
+    if payload.get("webhook_type") == "LINK" and payload.get("webhook_code") == "SESSION_FINISHED":
+        # Hosted Link finished in the browser: exchange every public token for
+        # the user who started this link session.
+        link_user = _pending_links.pop(payload.get("link_token", ""), None)
+        if link_user and payload.get("status") == "SUCCESS":
+            client = PlaidClient()
+            for public_token in payload.get("public_tokens", []):
+                access_token, item_id = client.exchange_public_token(public_token)
+                _complete_link(db, user_id=link_user, access_token=access_token,
+                               item_id=item_id, institution="")
     if payload.get("webhook_type") == "TRANSACTIONS":
         from sqlalchemy import select
 

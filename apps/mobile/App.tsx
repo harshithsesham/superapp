@@ -357,11 +357,33 @@ function App() {
         return;
       }
       if (kind === "action_tapped" && targetId === "finance.link") {
-        setBusy(true);
-        fetch(`${apiUrl}/v1/finance/link/sandbox`, { method: "POST", headers: AUTH })
-          .then((res) => applyScreen(res))
-          .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-          .finally(() => setBusy(false));
+        (async () => {
+          setBusy(true);
+          try {
+            setError(null);
+            const res = await fetch(`${apiUrl}/v1/finance/link/hosted`, {
+              method: "POST",
+              headers: AUTH,
+            });
+            if (res.ok) {
+              // Real banks: Plaid's hosted flow in the browser, bounced back
+              // via superapp:// — the webhook completes the link server-side.
+              const { hosted_link_url } = await res.json();
+              await WebBrowser.openAuthSessionAsync(hosted_link_url, "superapp://bank-linked");
+              await load(true);
+              setTimeout(() => load(), 8000); // webhook exchange can trail the bounce
+            } else {
+              // Plaid not configured: the stub bank keeps the vertical usable.
+              await applyScreen(
+                await fetch(`${apiUrl}/v1/finance/link/sandbox`, { method: "POST", headers: AUTH })
+              );
+            }
+          } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+          } finally {
+            setBusy(false);
+          }
+        })();
         return;
       }
       fetch(`${apiUrl}/v1/reactions`, {

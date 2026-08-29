@@ -44,21 +44,24 @@ class PlaidClient:
         )
         return self.exchange_public_token(pub["public_token"])
 
-    def hosted_link_url(self, *, user_id: str, webhook_url: str | None) -> str:
-        """Hosted Link for real banks — works from Expo Go (opens in the browser)."""
+    def hosted_link_url(self, *, user_id: str, webhook_url: str | None) -> tuple[str, str]:
+        """Hosted Link for real banks — opens in the browser, bounces back to
+        the app when done. Returns (url, link_token); the LINK webhook carries
+        the link_token, which is how completion finds its user."""
         if self.stubbed:
-            return "https://example.com/stub-hosted-link"
+            return "https://example.com/stub-hosted-link", "stub-link-token"
         payload = {
-            "client_name": "Super App",
+            "client_name": "Nano Super App",
             "language": "en",
             "country_codes": ["US"],
             "user": {"client_user_id": user_id},
             "products": ["transactions"],
-            "hosted_link": {},
+            "hosted_link": {"completion_redirect_uri": "superapp://bank-linked"},
         }
         if webhook_url:
             payload["webhook"] = webhook_url
-        return self._post("/link/token/create", payload)["hosted_link_url"]
+        data = self._post("/link/token/create", payload)
+        return data["hosted_link_url"], data["link_token"]
 
     def exchange_public_token(self, public_token: str) -> tuple[str, str]:
         data = self._post("/item/public_token/exchange", {"public_token": public_token})
