@@ -43,13 +43,13 @@ def meals_context(db: Session, user_id: str) -> dict:
     plus a week of history for pattern-spotting."""
     now = datetime.now(timezone.utc)
     today_start = _day_start(now)
-    week_ago = today_start - timedelta(days=7)
+    week_ago = today_start - timedelta(days=14)
 
     meals = list(db.scalars(
         select(NutritionMeal)
         .where(NutritionMeal.user_id == user_id, NutritionMeal.logged_at >= week_ago)
         .order_by(NutritionMeal.logged_at.desc())
-        .limit(60)
+        .limit(120)
     ))
 
     def row(m: NutritionMeal) -> dict:
@@ -85,9 +85,10 @@ def meals_context(db: Session, user_id: str) -> dict:
                  "active_kcal": activity_event.payload.get("active_kcal", 0)}
                 if activity_event else None)
 
-    # The week, day by day (last 7 including today), for the chart.
+    # Two weeks, day by day (today last) — the strip scrolls, the chart
+    # takes the trailing seven.
     week = []
-    for d in range(6, -1, -1):
+    for d in range(13, -1, -1):
         day0 = today_start - timedelta(days=d)
         day1 = day0 + timedelta(days=1)
         day_meals = [m for m in meals if day0 <= aware(m.logged_at) < day1]

@@ -2,7 +2,7 @@
 // content; how they look was decided once, here. Adding a component to the
 // registry = adding a case to this switch + a type in types.ts + blocks.py.
 import React, { useState } from "react";
-import { Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Circle } from "react-native-svg";
 import type { LeafBlock, Screen, Section } from "./types";
@@ -344,7 +344,7 @@ const cn = StyleSheet.create({
     color: "#C7B8FF",
   },
   dayCell: {
-    flex: 1,
+    width: 46,
     alignItems: "center",
     paddingVertical: 8,
     borderRadius: 12,
@@ -463,6 +463,32 @@ const mt = StyleSheet.create({
   },
   fill: { height: 3, borderRadius: 2 },
 });
+
+function DayStripView({ block }: { block: Extract<LeafBlock, { type: "day_strip" }> }) {
+  const scrollRef = React.useRef<ScrollView>(null);
+  return (
+    <View>
+      {block.chip ? (
+        <Text style={[cn.chip, { alignSelf: "flex-end", marginBottom: 8 }]}>● {block.chip}</Text>
+      ) : null}
+      <ScrollView
+        ref={scrollRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
+        contentContainerStyle={{ gap: 6 }}
+      >
+        {block.days.map((d, i) => (
+          <View key={i} style={[cn.dayCell, d.today && cn.dayCellToday]}>
+            <Text style={[cn.dayLetter, d.today && cn.dayTextToday]}>{d.letter}</Text>
+            <Text style={[cn.dayNum, d.today && cn.dayTextToday]}>{d.num}</Text>
+            <View style={[cn.dayDot, { opacity: d.logged ? 1 : 0 }]} />
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
 
 const TONE_COLORS: Record<string, string> = {
   ask: "#FF9DA8",
@@ -695,22 +721,7 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
       return <TimelineView block={block} dark={dark} />;
 
     case "day_strip":
-      return (
-        <View>
-          {block.chip ? (
-            <Text style={[cn.chip, { alignSelf: "flex-end", marginBottom: 8 }]}>● {block.chip}</Text>
-          ) : null}
-          <View style={{ flexDirection: "row", gap: 6 }}>
-            {block.days.map((d, i) => (
-              <View key={i} style={[cn.dayCell, d.today && cn.dayCellToday]}>
-                <Text style={[cn.dayLetter, d.today && cn.dayTextToday]}>{d.letter}</Text>
-                <Text style={[cn.dayNum, d.today && cn.dayTextToday]}>{d.num}</Text>
-                <View style={[cn.dayDot, { opacity: d.logged ? 1 : 0 }]} />
-              </View>
-            ))}
-          </View>
-        </View>
-      );
+      return <DayStripView block={block} />;
 
     case "ring_hero": {
       const R = 34;
@@ -821,6 +832,7 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
                 s.action,
                 dark && dk.action,
                 action.style === "secondary" && s.actionSecondary,
+                dark && action.style === "secondary" && dk.actionSecondary,
                 action.style === "destructive" && s.actionDestructive,
               ]}
               onPress={() => onReaction("action_tapped", action.id)}
@@ -896,6 +908,11 @@ const tl = StyleSheet.create({
 });
 
 const dk = StyleSheet.create({
+  actionSecondary: {
+    backgroundColor: "#14101F",
+    borderWidth: 1,
+    borderColor: "rgba(199,184,255,0.18)",
+  },
   screenTitle: { color: "#F4F2FA", fontFamily: "InstrumentSerif_400Regular", fontWeight: "400" },
   sectionTitle: {
     color: "#8A87A3",

@@ -313,6 +313,8 @@ function App() {
     setAuthState("signin");
   }, []);
 
+  const [orbSignal, setOrbSignal] = useState(0);
+
   const onFixMeal = useCallback((mealId: string) => {
     Alert.prompt(
       "Fix this estimate",
@@ -426,6 +428,10 @@ function App() {
           })
           .catch((e) => setError(e instanceof Error ? e.message : String(e)))
           .finally(() => setBusy(false));
+        return;
+      }
+      if (kind === "action_tapped" && targetId === "nutrition.setup") {
+        setOrbSignal((n) => n + 1); // summon Nano; it asks, you answer
         return;
       }
       if (kind === "action_tapped" && targetId === "nutrition.photo") {
@@ -567,11 +573,11 @@ function App() {
       </ScrollView>
 
       {screenName === "home" && (
-      <View style={styles.logBar}>
+      <View style={[styles.logBar, dark && styles.logBarDark]}>
         <TextInput
-          style={styles.input}
+          style={[styles.input, dark && styles.inputDark]}
           placeholder="What did you eat?"
-          placeholderTextColor="#9A9A97"
+          placeholderTextColor={dark ? "#8A87A3" : "#9A9A97"}
           value={mealText}
           onChangeText={setMealText}
           onSubmitEditing={logMealText}
@@ -591,7 +597,7 @@ function App() {
       </View>
       )}
       {screenName === "stylist" && (
-        <View style={styles.logBar}>
+        <View style={[styles.logBar, dark && styles.logBarDark]}>
           <Pressable
             style={[styles.logButton, { flex: 1 }]}
             onPress={() => uploadPhoto("/v1/wardrobe/photo")}
@@ -605,6 +611,7 @@ function App() {
       <NanoOrb
         apiUrl={apiUrl}
         auth={AUTH}
+        openSignal={orbSignal}
         onNavigate={onNavigate}
         onRefreshInbox={() => {
           setScreenName("inbox");
@@ -802,4 +809,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   logButtonText: { color: "#FFF", fontWeight: "600", fontSize: 15 },
+  inputDark: {
+    borderColor: "rgba(199,184,255,0.22)",
+    backgroundColor: "#14101F",
+    color: "#F4F2FA",
+  },
 });

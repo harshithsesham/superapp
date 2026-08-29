@@ -253,14 +253,15 @@ def nutrition_render(context: ContextSlice) -> Screen:
                 text=f"{activity['steps']:,} steps · {activity.get('active_kcal', 0):,} kcal burned",
                 variant="caption"))
     else:
-        stats = [Stat(label="Today", value=str(today["kcal"]), unit="kcal")]
-        if target:
-            stats.append(Stat(label="Target", value=str(target), unit="kcal"))
-            stats.append(Stat(label="Left", value=str(max(target - today["kcal"], 0)), unit="kcal"))
-        blocks.append(StatRow(stats=stats))
+        blocks.append(TextBlock(text="Let's build your plan.", variant="title"))
         blocks.append(TextBlock(
-            text="Tap the orb — one minute of talking and I'll build your daily plan.",
-            variant="caption"))
+            text="One minute of talking: your weight, height, target weight, and "
+                 "how you train — I'll compute your daily calories and macros "
+                 "from it. Nothing is guessed.",
+            variant="body"))
+        blocks.append(ActionRow(actions=[
+            Action(id="nutrition.setup", label="Set up with Nano")
+        ]))
 
     blocks.append(TextBlock(text=f"TODAY · {len(today['meals'])} LOGGED", variant="caption"))
     if today["meals"]:
@@ -298,14 +299,15 @@ def nutrition_render(context: ContextSlice) -> Screen:
                   max=plan["water_ml"], unit="ml", tone="mint"),
         ]))
 
-    if any(d["kcal"] for d in week):
-        avg_days = [d for d in week if d["kcal"]]
+    chart_week = week[-7:]
+    if any(d["kcal"] for d in chart_week):
+        avg_days = [d for d in chart_week if d["kcal"]]
         avg = int(sum(d["kcal"] for d in avg_days) / max(len(avg_days), 1))
         blocks.append(TextBlock(text=f"THIS WEEK · {avg:,} KCAL DAILY AVERAGE",
                                 variant="caption"))
         blocks.append(BarChart(
             bars=[Bar(label=d["day"], value=d["kcal"],
-                      accent=(d["date"] == today.get("date"))) for d in week],
+                      accent=(d["date"] == today.get("date"))) for d in chart_week],
             target=float(plan["kcal"]) if plan else None,
         ))
 

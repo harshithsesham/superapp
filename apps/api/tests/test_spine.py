@@ -120,10 +120,10 @@ def test_phase1_exit_criterion_meal_flow():
     blocks = screen["sections"][0]["blocks"]
     meals = next(b for b in blocks if b["type"] == "list")
     assert "eggs" in meals["items"][0]["title"] and "kcal" in meals["items"][0]["subtitle"]
-    stats = next(b for b in blocks if b["type"] == "stat_row")
-    today = next(s for s in stats["stats"] if s["label"] == "Today")
-    assert int(today["value"]) > 0  # stub estimate landed in the twin
-    assert next(s for s in stats["stats"] if s["label"] == "Target")["value"] == "2200"
+    # No plan yet: the screen asks to be set up instead of guessing numbers.
+    setup = next(b for b in blocks if b["type"] == "action_row"
+                 and any(a["id"] == "nutrition.setup" for a in b["actions"]))
+    assert setup is not None
 
     # GET is still pure: repeat views change nothing.
     again = client.get("/v1/screen/home", headers=AUTH).json()
@@ -676,7 +676,7 @@ def test_nutrition_plan_from_voice_profile():
     assert "KCAL LEFT OF" in hero["label"] and hero["pct_label"] == "EATEN"
     assert len(hero["chips"]) == 3 and hero["chips"][0].startswith("P ")
     strip = next(b for b in blocks if b["type"] == "day_strip")
-    assert len(strip["days"]) == 7 and sum(1 for d in strip["days"] if d["today"]) == 1
+    assert len(strip["days"]) == 14 and sum(1 for d in strip["days"] if d["today"]) == 1
     meters = next(b for b in blocks if b["type"] == "meter_row")
     assert {m["label"] for m in meters["meters"]} == {"WATER"}
     actions = next(b for b in blocks if b["type"] == "action_row")
@@ -700,8 +700,8 @@ def test_second_user_token_full_isolation():
     try:
         # Co-founder authenticates and sees an EMPTY world, not harshith's.
         screen = client.get("/v1/screen/home", headers=CF).json()
-        stats = next(b for sec in screen["sections"] for b in sec["blocks"] if b["type"] == "stat_row")
-        assert next(st for st in stats["stats"] if st["label"] == "Today")["value"] == "0"
+        assert "Let's build your plan" in str(screen)  # unset, not inherited
+        assert "eggs" not in str(screen)  # none of harshith's meals leak
 
         hub = client.get("/v1/screen/hub", headers=CF).json()
         assert "Connect your inbox" in str(hub)  # no gmail account for this user

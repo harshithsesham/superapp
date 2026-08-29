@@ -28,12 +28,14 @@ export function NanoOrb({
   onNavigate,
   onRefreshInbox,
   onActed,
+  openSignal,
 }: {
   apiUrl: string;
   auth: Record<string, string>;
   onNavigate: (screen: string) => void;
   onRefreshInbox: () => void;
   onActed?: () => void;
+  openSignal?: number;
 }) {
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
@@ -322,6 +324,11 @@ export function NanoOrb({
     } catch {}
     listen();
   }, [apiUrl, auth, listen, speakThen, startRealtime]);
+
+  // The app can summon Nano (e.g. "Set up with Nano" on the nutrition screen).
+  useEffect(() => {
+    if (openSignal && !openRef.current) openOrb();
+  }, [openSignal]);
 
   // Closed: tap brings Nano over. Open: tap sends it back to the edge —
   // the only way it leaves besides an explicit goodbye.
