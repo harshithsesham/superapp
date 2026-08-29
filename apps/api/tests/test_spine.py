@@ -641,6 +641,42 @@ def test_sent_by_nano_is_visible_and_in_voice_context():
     db.close()
 
 
+def test_nutrition_plan_from_voice_profile():
+    from superapp.nutrition_plan import compute_plan, sanitize_profile
+    from superapp.routers.voice import _execute
+
+    # The math: a 75kg/175cm male, 2000-era, moderate, maintain.
+    plan = compute_plan({"sex": "male", "born_year": 2000, "height_cm": 175,
+                         "weight_kg": 75, "activity": "moderate", "goal": "maintain"})
+    assert 2300 < plan["kcal"] < 2700 and plan["protein_g"] == 128
+
+    # Junk from the model gets clamped away.
+    assert sanitize_profile({"weight_kg": "not a number", "goal": "LOSE", "hack": 1}) == {"goal": "lose"}
+
+    # The voice action writes profile + plan facts...
+    db = SessionLocal()
+    out = _execute(db, "harshith", {
+        "action_type": "set_nutrition",
+        "profile_json": '{"sex": "male", "born_year": 2000, "height_cm": 175, '
+                        '"weight_kg": 75, "activity": "moderate", "goal": "maintain"}',
+        "draft_id": "", "message_id": "", "reply_body": "", "to_addr": "", "subject": "",
+    })
+    db.commit()
+    assert out == {}
+    facts = {f.key: f.value for f in read_facts(db, user_id="harshith",
+                                                domains=["nutrition"], limit=30)}
+    assert facts["plan"]["kcal"] > 2000 and facts["profile"]["weight_kg"] == 75
+    db.close()
+
+    # ...and the nutrition screen turns into the calories-left hero with meters.
+    screen = client.get("/v1/screen/home", headers=AUTH).json()
+    blocks = [b for sec in screen["sections"] for b in sec["blocks"]]
+    hero = next(b for b in blocks if b["type"] == "text" and "calories left" in b["text"])
+    meters = next(b for b in blocks if b["type"] == "meter_row")
+    assert {m["label"] for m in meters["meters"]} == {"PROTEIN", "CARBS", "FAT"}
+    assert hero["variant"] == "title"
+
+
 def test_draft_card_explains_why_it_wrote_this():
     screen = client.get("/v1/screen/inbox", headers=AUTH).json()
     card = next(b for sec in screen["sections"] for b in sec["blocks"]

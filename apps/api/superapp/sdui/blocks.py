@@ -129,6 +129,21 @@ class AgentGrid(BaseModel):
     items: list[AgentGridItem]
 
 
+class Meter(BaseModel):
+    label: str  # "PROTEIN"
+    value: float  # consumed so far
+    max: float  # daily target
+    unit: str = "g"
+    tone: Literal["mint", "lavender", "rose", "amber"] = "lavender"
+
+
+class MeterRow(BaseModel):
+    """Thin progress lines — Nano's answer to macro rings."""
+
+    type: Literal["meter_row"] = "meter_row"
+    meters: list[Meter]
+
+
 class TimelineItem(BaseModel):
     text: str  # what happened, one line
     verdict: str  # fate chip: BECAME A QUESTION / REPLY DRAFTED / FILED / APPLIED SILENTLY ...
@@ -173,7 +188,7 @@ class ActionRow(BaseModel):
 
 
 LeafBlock = Annotated[
-    Union[TextBlock, InsightCard, StatRow, ImageCard, ListBlock, ImageGrid, OutfitCard, AgentCard, AgentGrid, DraftCard, Timeline, ActionRow],
+    Union[TextBlock, InsightCard, StatRow, ImageCard, ListBlock, ImageGrid, OutfitCard, AgentCard, AgentGrid, DraftCard, Timeline, MeterRow, ActionRow],
     Field(discriminator="type"),
 ]
 

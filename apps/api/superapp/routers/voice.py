@@ -57,6 +57,14 @@ CONVERSE_SYSTEM = (
     "no exceptions.\n"
     "recently_sent in context is the record of what YOU sent for them — "
     "when they ask what was sent, answer from it concretely (who, what, when).\n"
+    "NUTRITION SETUP: when they want a meal/calorie plan (or ask to set up "
+    "nutrition), collect conversationally — sex, birth year, height, weight, "
+    "workouts per week (map to activity: limited/moderate/athlete), and goal "
+    "(lose/maintain/gain). One or two questions at a time, accept any units "
+    "(convert to kg/cm). When you have enough, emit action=set_nutrition "
+    "with profile_json (keys: sex, born_year, height_cm, weight_kg, activity, "
+    "goal) and tell them their daily plan is ready. Partial updates are fine "
+    "(e.g. they just tell you a new weight).\n"
     "When they wrap up (goodbye, that's all, thanks I'm done): "
     "action=end_conversation with a short warm sign-off in say.\n"
     "Navigation requests: action=open_screen with screen "
@@ -73,17 +81,18 @@ CONVERSE_SCHEMA = {
         "action_type": {"type": "string",
                         "enum": ["none", "open_screen", "refresh_inbox", "start_interview",
                                  "draft_reply", "send_draft", "send_new_email",
-                                 "end_conversation"]},
+                                 "set_nutrition", "end_conversation"]},
         "screen": {"type": "string", "enum": ["hub", "inbox", "home", "finance", "stylist", ""]},
         "draft_id": {"type": "string"},
         "message_id": {"type": "string"},
         "reply_body": {"type": "string"},
         "to_addr": {"type": "string"},
         "subject": {"type": "string"},
+        "profile_json": {"type": "string"},
         "listen": {"type": "boolean"},
     },
     "required": ["say", "action_type", "screen", "draft_id", "message_id", "reply_body",
-                 "to_addr", "subject", "listen"],
+                 "to_addr", "subject", "profile_json", "listen"],
     "additionalProperties": False,
 }
 
@@ -171,6 +180,28 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
             create_draft(db, user_id=user_id, message_id=msg.id, body=parsed["reply_body"])
             append_event(db, user_id=user_id, type="draft_created", agent="orb", domain="inbox",
                          payload={"message_id": msg.id, "via": "voice"})
+        return {}
+    if action == "set_nutrition" and parsed.get("profile_json"):
+        from ..nutrition_plan import compute_plan, sanitize_profile
+        from ..substrate import read_facts, write_fact
+
+        try:
+            incoming = sanitize_profile(json.loads(parsed["profile_json"]))
+        except json.JSONDecodeError:
+            return {"say": "I didn't quite get those numbers — run them by me again?"}
+        if not incoming:
+            return {"say": "I didn't quite get those numbers — run them by me again?"}
+        facts = read_facts(db, user_id=user_id, domains=["nutrition"], limit=30)
+        existing = next((f.value for f in facts if f.key == "profile"), {})
+        profile = {**existing, **incoming}
+        write_fact(db, user_id=user_id, domain="nutrition", key="profile",
+                   value=profile, confidence=1.0, source_agent="orb")
+        plan = compute_plan(profile)
+        if plan:
+            write_fact(db, user_id=user_id, domain="nutrition", key="plan",
+                       value=plan, confidence=1.0, source_agent="orb")
+            append_event(db, user_id=user_id, type="nutrition_plan_set", agent="orb",
+                         domain="nutrition", payload=plan)
         return {}
     if action == "send_new_email" and parsed.get("to_addr") and parsed.get("reply_body"):
         settings = get_settings()
@@ -295,7 +326,8 @@ def converse(body: ConverseBody, user_id: str = Depends(current_user_id),
     return {
         "say": parsed["say"], "action": parsed["action_type"],
         "screen": parsed.get("screen", ""), "listen": parsed.get("listen", False),
-        "acted": parsed["action_type"] in ("draft_reply", "send_draft", "send_new_email"),
+        "acted": parsed["action_type"] in ("draft_reply", "send_draft", "send_new_email",
+                                           "set_nutrition"),
     }
 
 

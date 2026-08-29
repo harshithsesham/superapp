@@ -18,7 +18,10 @@ from sqlalchemy.orm import Session
 
 from .. import storage
 from ..llm.provider import LLMProvider
-from ..sdui.blocks import ImageCard, InsightCard, ListBlock, ListItem, Screen, Section, Stat, StatRow, TextBlock
+from ..sdui.blocks import (
+    ImageCard, InsightCard, ListBlock, ListItem, Meter, MeterRow, Screen,
+    Section, Stat, StatRow, TextBlock,
+)
 from ..substrate import ContextSlice, update_meal_estimate
 from .base import EventWrite, FactWrite, ThinkResult, register_agent
 
@@ -53,6 +56,12 @@ MEAL_SCHEMA = {
 }
 
 STUB_ESTIMATE = {"kcal": 500, "protein_g": 20.0, "carbs_g": 50.0, "fat_g": 20.0, "confidence": 0.2}
+
+
+def _plan(context: ContextSlice) -> dict | None:
+    fact = next((f for f in context.facts
+                 if f["domain"] == "nutrition" and f["key"] == "plan"), None)
+    return fact["value"] if fact else None
 
 
 def _target_kcal(context: ContextSlice) -> int | None:
@@ -169,11 +178,33 @@ def nutrition_render(context: ContextSlice) -> Screen:
         None,
     )
 
-    stats = [Stat(label="Today", value=str(today["kcal"]), unit="kcal")]
-    if target:
-        stats.append(Stat(label="Target", value=str(target), unit="kcal"))
-        stats.append(Stat(label="Left", value=str(max(target - today["kcal"], 0)), unit="kcal"))
-    blocks: list = [StatRow(stats=stats)]
+    plan = _plan(context)
+    blocks: list = []
+
+    if plan:
+        # The Cal AI hero, in Nano's voice: what's LEFT, counted honestly.
+        left = max(plan["kcal"] - today["kcal"], 0)
+        blocks.append(TextBlock(text=f"{left:,} calories left.", variant="title"))
+        blocks.append(TextBlock(
+            text=f"{today['kcal']:,} of {plan['kcal']:,} eaten · plan: {plan.get('goal', 'maintain')}",
+            variant="caption"))
+        blocks.append(MeterRow(meters=[
+            Meter(label="PROTEIN", value=today.get("protein_g", 0) or 0,
+                  max=plan["protein_g"], tone="rose"),
+            Meter(label="CARBS", value=today.get("carbs_g", 0) or 0,
+                  max=plan["carbs_g"], tone="amber"),
+            Meter(label="FAT", value=today.get("fat_g", 0) or 0,
+                  max=plan["fat_g"], tone="lavender"),
+        ]))
+    else:
+        stats = [Stat(label="Today", value=str(today["kcal"]), unit="kcal")]
+        if target:
+            stats.append(Stat(label="Target", value=str(target), unit="kcal"))
+            stats.append(Stat(label="Left", value=str(max(target - today["kcal"], 0)), unit="kcal"))
+        blocks.append(StatRow(stats=stats))
+        blocks.append(TextBlock(
+            text="Tap the orb — one minute of talking and I'll build your daily plan.",
+            variant="caption"))
 
     if today["meals"]:
         blocks.append(
@@ -182,8 +213,11 @@ def nutrition_render(context: ContextSlice) -> Screen:
                     ListItem(
                         id=m["id"],
                         title=m["description"] or m["source"],
-                        subtitle=f"{m['protein_g'] or 0:g}p / {m['carbs_g'] or 0:g}c / {m['fat_g'] or 0:g}f",
+                        subtitle=f"{m['protein_g'] or 0:g}g P · {m['carbs_g'] or 0:g}g C · {m['fat_g'] or 0:g}g F",
                         trailing=f"{m['kcal'] or '…'} kcal",
+                        detail=(f"{m['description']}\n\n{m['kcal'] or '?'} kcal — "
+                                f"protein {m['protein_g'] or 0:g}g, carbs {m['carbs_g'] or 0:g}g, "
+                                f"fat {m['fat_g'] or 0:g}g."),
                     )
                     for m in today["meals"]
                 ]
@@ -194,9 +228,6 @@ def nutrition_render(context: ContextSlice) -> Screen:
             blocks.append(ImageCard(image_url=f"/v1/media/{last_photo}", title="Latest meal"))
     else:
         blocks.append(TextBlock(text="No meals logged today. Snap your next one.", variant="caption"))
-
-    if not target:
-        blocks.append(TextBlock(text="Set a daily target to get pacing stats.", variant="caption"))
 
     if summary:
         blocks.append(

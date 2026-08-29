@@ -310,6 +310,34 @@ function ExpandableRow({
   );
 }
 
+const METER_TONES: Record<string, string> = {
+  mint: "#7CF7C4",
+  lavender: "#C7B8FF",
+  rose: "#FF9DA8",
+  amber: "#F5C97B",
+};
+
+const mt = StyleSheet.create({
+  label: {
+    fontFamily: "JetBrainsMono_400Regular",
+    fontSize: 10,
+    letterSpacing: 1.6,
+    color: "#8A87A3",
+  },
+  left: {
+    fontFamily: "JetBrainsMono_400Regular",
+    fontSize: 11,
+    letterSpacing: 0.4,
+  },
+  track: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "rgba(199,184,255,0.14)",
+    overflow: "hidden",
+  },
+  fill: { height: 3, borderRadius: 2 },
+});
+
 const TONE_COLORS: Record<string, string> = {
   ask: "#FF9DA8",
   did: "#C7B8FF",
@@ -539,6 +567,35 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
 
     case "timeline":
       return <TimelineView block={block} dark={dark} />;
+
+    case "meter_row":
+      return (
+        <View style={[s.card, dark && dk.card, { paddingVertical: 16 }]}>
+          {block.meters.map((m, i) => {
+            const pct = Math.max(0, Math.min(1, m.max > 0 ? m.value / m.max : 0));
+            const left = Math.max(0, Math.round(m.max - m.value));
+            return (
+              <View key={i} style={{ marginTop: i > 0 ? 14 : 0 }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
+                  <Text style={mt.label}>{m.label}</Text>
+                  <Text style={[mt.left, { color: METER_TONES[m.tone ?? "lavender"] }]}>
+                    {left}
+                    {m.unit ?? "g"} left
+                  </Text>
+                </View>
+                <View style={mt.track}>
+                  <View
+                    style={[
+                      mt.fill,
+                      { width: `${Math.round(pct * 100)}%`, backgroundColor: METER_TONES[m.tone ?? "lavender"] },
+                    ]}
+                  />
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      );
 
     case "action_row":
       return (

@@ -37,6 +37,8 @@ MODELS: list[type[BaseModel]] = [
     blocks.AgentGridItem,
     blocks.AgentGrid,
     blocks.DraftCard,
+    blocks.Meter,
+    blocks.MeterRow,
     blocks.TimelineItem,
     blocks.Timeline,
     blocks.Action,

@@ -532,6 +532,68 @@
       "title": "ListItem",
       "type": "object"
     },
+    "Meter": {
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "max": {
+          "title": "Max",
+          "type": "number"
+        },
+        "unit": {
+          "default": "g",
+          "title": "Unit",
+          "type": "string"
+        },
+        "tone": {
+          "default": "lavender",
+          "enum": [
+            "mint",
+            "lavender",
+            "rose",
+            "amber"
+          ],
+          "title": "Tone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "value",
+        "max"
+      ],
+      "title": "Meter",
+      "type": "object"
+    },
+    "MeterRow": {
+      "description": "Thin progress lines \u2014 Nano's answer to macro rings.",
+      "properties": {
+        "type": {
+          "const": "meter_row",
+          "default": "meter_row",
+          "title": "Type",
+          "type": "string"
+        },
+        "meters": {
+          "items": {
+            "$ref": "#/$defs/Meter"
+          },
+          "title": "Meters",
+          "type": "array"
+        }
+      },
+      "required": [
+        "meters"
+      ],
+      "title": "MeterRow",
+      "type": "object"
+    },
     "OutfitCard": {
       "description": "One suggested outfit: garment strip + rationale + like/dislike.\nThe client posts outfit_liked / outfit_rejected reactions with this id.",
       "properties": {
@@ -649,6 +711,7 @@
                 "image_grid": "#/$defs/ImageGrid",
                 "insight_card": "#/$defs/InsightCard",
                 "list": "#/$defs/ListBlock",
+                "meter_row": "#/$defs/MeterRow",
                 "outfit_card": "#/$defs/OutfitCard",
                 "stat_row": "#/$defs/StatRow",
                 "text": "#/$defs/TextBlock",
@@ -689,6 +752,9 @@
               },
               {
                 "$ref": "#/$defs/Timeline"
+              },
+              {
+                "$ref": "#/$defs/MeterRow"
               },
               {
                 "$ref": "#/$defs/ActionRow"
