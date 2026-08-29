@@ -583,6 +583,7 @@ function App() {
             auth={AUTH}
             onOpenOrb={() => setOrbSignal((n) => n + 1)}
             onConnectHealth={() => setHealthSignal((n) => n + 1)}
+            onBack={() => setScreenName("hub")}
           />
         </View>
       ) : null}

@@ -187,11 +187,13 @@ export function CalScreen({
   auth,
   onOpenOrb,
   onConnectHealth,
+  onBack,
 }: {
   apiUrl: string;
   auth: Auth;
   onOpenOrb: () => void;
   onConnectHealth: () => void;
+  onBack?: () => void;
 }) {
   const [state, setState] = useState<CalState | null>(null);
   const [view, setView] = useState<"home" | "settings">("home");
@@ -344,6 +346,11 @@ export function CalScreen({
       >
         <View style={s.header}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            {onBack ? (
+              <Pressable onPress={onBack} style={s.headerBack} hitSlop={10}>
+                <Text style={{ color: C.body, fontSize: 15 }}>‹</Text>
+              </Pressable>
+            ) : null}
             <Pressable onPress={onOpenOrb}>
               <Planet size={26} />
             </Pressable>
@@ -885,6 +892,16 @@ const s = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     overflow: "hidden",
+  },
+  headerBack: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: C.line,
+    backgroundColor: C.card,
+    alignItems: "center",
+    justifyContent: "center",
   },
   personBtn: {
     width: 32,
