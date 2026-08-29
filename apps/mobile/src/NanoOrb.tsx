@@ -19,7 +19,8 @@ type OrbPhase = "idle" | "listening" | "thinking" | "speaking";
 type OrbMode = "converse" | "interview";
 type ConverseTurn = { role: "user" | "nano"; text: string };
 
-const MAX_EMPTY_LISTENS = 4; // ~2 quiet minutes before Nano bows out
+// The orb never leaves on its own — only a tap or an explicit goodbye ends
+// it. Quiet stretches just keep the ear open.
 
 export function NanoOrb({
   apiUrl,
@@ -242,19 +243,12 @@ export function NanoOrb({
     if (heard && finalRef.current === "") {
       submit(heard);
     } else if (!heard) {
-      // Silence: quietly listen again, up to a point — then bow out.
-      emptyListens.current += 1;
-      if (emptyListens.current >= MAX_EMPTY_LISTENS) collapse();
-      else listen();
+      listen(); // silence is fine — stay open, keep the ear on
     }
   });
   useSpeechRecognitionEvent("error", () => {
     if (!openRef.current || rtActive.current) return;
-    if (phase === "listening") {
-      emptyListens.current += 1;
-      if (emptyListens.current >= MAX_EMPTY_LISTENS) collapse();
-      else setTimeout(() => listen(), 600);
-    }
+    if (phase === "listening") setTimeout(() => listen(), 600);
   });
 
   const startRealtime = useCallback(async (): Promise<boolean> => {
@@ -272,7 +266,12 @@ export function NanoOrb({
           else setSay(message);
         },
         onDisconnect: () => {
-          if (rtActive.current) collapse();
+          if (!rtActive.current || !openRef.current) return;
+          // Session died under us (quota, network). The ball stays; the
+          // turn-based loop picks the conversation up without a beat.
+          rtActive.current = false;
+          if (rtPoll.current) clearInterval(rtPoll.current);
+          listen();
         },
         onError: () => {},
       } as never);

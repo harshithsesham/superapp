@@ -32,6 +32,7 @@ def tts(text: str) -> bytes:
         },
         timeout=60,
     )
-    resp.raise_for_status()
+    if resp.status_code != 200:
+        return b""  # quota or transient failure: the orb shows text, silently
     cached.write_bytes(resp.content)
     return resp.content
