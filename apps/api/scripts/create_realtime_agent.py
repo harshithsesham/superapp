@@ -35,7 +35,7 @@ config = {
         },
         "tts": {
             "voice_id": os.environ.get("SUPERAPP_NANO_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb"),
-            "model_id": "eleven_flash_v2_5",
+            "model_id": "eleven_flash_v2",
         },
     },
     "platform_settings": {
@@ -45,14 +45,16 @@ config = {
 
 # 1) store the shared secret in their workspace vault, reference it by id
 r = httpx.post(f"{BASE}/v1/convai/secrets", headers=H, timeout=30,
-               json={"name": "nano-realtime-secret", "value": SECRET})
+               json={"type": "new", "name": "nano-realtime-secret", "value": SECRET})
 if r.status_code not in (200, 201):
     # maybe it exists already — find it
     listing = httpx.get(f"{BASE}/v1/convai/secrets", headers=H, timeout=30).json()
     match = next((s for s in listing.get("secrets", [])
                   if s.get("name") == "nano-realtime-secret"), None)
     if not match:
-        print("secret create failed:", r.status_code, r.text[:400])
+        # never echo the request body here: it carries the secret value
+        print("secret create failed:", r.status_code,
+              r.text.replace(SECRET, "***")[:400])
         sys.exit(1)
     secret_id = match["secret_id"]
 else:
@@ -66,6 +68,6 @@ config["conversation_config"]["agent"]["prompt"]["custom_llm_extra_body"] = True
 r = httpx.post(f"{BASE}/v1/convai/agents/create", headers=H, timeout=30,
                json=config)
 if r.status_code not in (200, 201):
-    print("agent create failed:", r.status_code, r.text[:1500])
+    print("agent create failed:", r.status_code, r.text.replace(SECRET, "***")[:1500])
     sys.exit(1)
 print("AGENT_ID=" + r.json()["agent_id"])
