@@ -25,7 +25,7 @@ from ..db import get_db
 from ..memory import recall
 from ..substrate import get_context
 from ..substrate.events import append_event
-from .voice import CONVERSE_SYSTEM, _execute, _inbox_for_voice
+from .voice import CONVERSE_SYSTEM, _execute, _inbox_for_voice, _nutrition_for_voice
 
 router = APIRouter(tags=["realtime"])
 
@@ -112,6 +112,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db),
     grounding = {
         "conversation": turns[-16:],
         "inbox": _inbox_for_voice(context),
+        "nutrition": _nutrition_for_voice(context),
         "remembered": recall(db, user_id=user_id, query=last_user or "today", k=4),
         "person": [f for f in context.facts if f["domain"] in ("identity", "inbox", "goals")][:12],
         "knows_person": any(f["domain"] == "identity" for f in context.facts),

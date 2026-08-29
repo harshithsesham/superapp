@@ -55,6 +55,9 @@ CONVERSE_SYSTEM = (
     "sending THAT draft: action=send_new_email with to_addr, subject, "
     "reply_body. New recipients always get this read-back-and-confirm, "
     "no exceptions.\n"
+    "nutrition in context is their live day — plan targets, what they ate, "
+    "kcal_left, water — answer calorie/macro/water questions from it with "
+    "real numbers, never estimates of your own.\n"
     "recently_sent in context is the record of what YOU sent for them — "
     "when they ask what was sent, answer from it concretely (who, what, when).\n"
     "They log water by voice ('log a glass of water', 'I drank a bottle'): "
@@ -108,6 +111,26 @@ class Turn(BaseModel):
 
 class ConverseBody(BaseModel):
     messages: list[Turn] = Field(min_length=1, max_length=40)
+
+
+def _nutrition_for_voice(context) -> dict:
+    """What Nano needs to answer 'how many calories are left' and kin."""
+    data = context.domain_data.get("nutrition", {})
+    plan = next((f["value"] for f in context.facts
+                 if f["domain"] == "nutrition" and f["key"] == "plan"), None)
+    today = data.get("today", {})
+    out = {
+        "plan": plan,
+        "today": {k: today.get(k) for k in ("kcal", "protein_g", "carbs_g", "fat_g",
+                                            "fiber_g", "sugar_g", "sodium_mg", "water_ml")},
+        "meals_today": [{"what": m.get("description"), "kcal": m.get("kcal")}
+                        for m in today.get("meals", [])][:8],
+        "activity": data.get("activity"),
+    }
+    if plan and plan.get("kcal") is not None:
+        out["kcal_left"] = max(plan["kcal"] - (today.get("kcal") or 0), 0)
+        out["water_ml_left"] = max(plan.get("water_ml", 0) - (today.get("water_ml") or 0), 0)
+    return out
 
 
 def _inbox_for_voice(context) -> dict:
@@ -295,6 +318,7 @@ def converse(body: ConverseBody, user_id: str = Depends(current_user_id),
         prompt=json.dumps({
             "conversation": [t.model_dump() for t in body.messages[-16:]],
             "inbox": voice_inbox,
+            "nutrition": _nutrition_for_voice(context),
             "remembered": recall(db, user_id=user_id,
                                  query=body.messages[-1].text, k=4),
             "person": [f for f in context.facts if f["domain"] in ("identity", "inbox", "goals")][:12],
