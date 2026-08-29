@@ -201,6 +201,8 @@ export function CalScreen({
   const [openMeal, setOpenMeal] = useState<string | null>(null);
   const [waterSheet, setWaterSheet] = useState(false);
   const [waterAmt, setWaterAmt] = useState(0);
+  const [mode, setMode] = useState<"left" | "eaten">("left");
+  const flip = () => setMode((m) => (m === "left" ? "eaten" : "left"));
   const pagerRef = useRef<ScrollView>(null);
   const stripRef = useRef<ScrollView>(null);
 
@@ -383,8 +385,9 @@ export function CalScreen({
           }
           style={{ marginTop: 12 }}
         >
-          {/* Panel 1 — the budget */}
+          {/* Panel 1 — the budget; one tap flips LEFT <-> EATEN everywhere */}
           <View style={s.panel}>
+            <Pressable onPress={flip}>
             <LinearGradient
               colors={["#2A2050", "#151024"]}
               start={{ x: 0.15, y: 0 }}
@@ -392,27 +395,34 @@ export function CalScreen({
               style={s.heroCard}
             >
               <View style={{ flex: 1 }}>
-                <Text style={s.heroBig}>{left.toLocaleString()}</Text>
-                <Text style={s.monoLabel}>KCAL LEFT OF {plan.kcal.toLocaleString()}</Text>
+                <Text style={s.heroBig}>
+                  {(mode === "left" ? left : t.kcal).toLocaleString()}
+                </Text>
+                <Text style={s.monoLabel}>
+                  KCAL {mode === "left" ? "LEFT" : "EATEN"} OF {plan.kcal.toLocaleString()}  ⇅
+                </Text>
               </View>
               <View style={{ width: 76, height: 76, alignItems: "center", justifyContent: "center" }}>
                 <Ring size={76} stroke={7} pct={eatenPct} color={C.lavDeep} />
                 <Text style={[s.ringPct, { position: "absolute" }]}>{Math.round(eatenPct * 100)}%</Text>
               </View>
             </LinearGradient>
+            </Pressable>
             <View style={s.trioRow}>
               {[
-                { v: Math.max(plan.protein_g - (t.protein_g || 0), 0), l: "PROTEIN LEFT", c: C.lavDeep, pct: (t.protein_g || 0) / plan.protein_g, u: "g" },
-                { v: Math.max(plan.carbs_g - (t.carbs_g || 0), 0), l: "CARBS LEFT", c: C.amber, pct: (t.carbs_g || 0) / plan.carbs_g, u: "g" },
-                { v: Math.max(plan.fat_g - (t.fat_g || 0), 0), l: "FAT LEFT", c: C.mint, pct: (t.fat_g || 0) / plan.fat_g, u: "g" },
+                { left: plan.protein_g - (t.protein_g || 0), eaten: t.protein_g || 0, name: "PROTEIN", c: C.lavDeep, pct: (t.protein_g || 0) / plan.protein_g },
+                { left: plan.carbs_g - (t.carbs_g || 0), eaten: t.carbs_g || 0, name: "CARBS", c: C.amber, pct: (t.carbs_g || 0) / plan.carbs_g },
+                { left: plan.fat_g - (t.fat_g || 0), eaten: t.fat_g || 0, name: "FAT", c: C.mint, pct: (t.fat_g || 0) / plan.fat_g },
               ].map((m, i) => (
-                <View key={i} style={s.trioCard}>
-                  <Text style={s.trioValue}>{Math.round(m.v)}{m.u}</Text>
-                  <Text style={s.trioLabel}>{m.l}</Text>
+                <Pressable key={i} onPress={flip} style={s.trioCard}>
+                  <Text style={s.trioValue}>
+                    {Math.round(mode === "left" ? Math.max(m.left, 0) : m.eaten)}g
+                  </Text>
+                  <Text style={s.trioLabel}>{m.name} {mode === "left" ? "LEFT" : "EATEN"}</Text>
                   <View style={{ marginTop: 10 }}>
                     <Ring size={30} stroke={4} pct={m.pct} color={m.c} />
                   </View>
-                </View>
+                </Pressable>
               ))}
             </View>
           </View>
@@ -421,17 +431,19 @@ export function CalScreen({
           <View style={s.panel}>
             <View style={s.trioRow}>
               {[
-                { v: Math.max((plan.fiber_g ?? 30) - (t.fiber_g || 0), 0), l: "FIBER LEFT", c: C.lavDeep, pct: (t.fiber_g || 0) / (plan.fiber_g ?? 30), u: "g" },
-                { v: Math.max((plan.sugar_g_max ?? 55) - (t.sugar_g || 0), 0), l: "SUGAR LEFT", c: C.rose, pct: (t.sugar_g || 0) / (plan.sugar_g_max ?? 55), u: "g" },
-                { v: Math.max((plan.sodium_mg_max ?? 2300) - (t.sodium_mg || 0), 0), l: "SODIUM LEFT", c: C.amber, pct: (t.sodium_mg || 0) / (plan.sodium_mg_max ?? 2300), u: "mg" },
+                { left: (plan.fiber_g ?? 30) - (t.fiber_g || 0), eaten: t.fiber_g || 0, name: "FIBER", c: C.lavDeep, pct: (t.fiber_g || 0) / (plan.fiber_g ?? 30), u: "g" },
+                { left: (plan.sugar_g_max ?? 55) - (t.sugar_g || 0), eaten: t.sugar_g || 0, name: "SUGAR", c: C.rose, pct: (t.sugar_g || 0) / (plan.sugar_g_max ?? 55), u: "g" },
+                { left: (plan.sodium_mg_max ?? 2300) - (t.sodium_mg || 0), eaten: t.sodium_mg || 0, name: "SODIUM", c: C.amber, pct: (t.sodium_mg || 0) / (plan.sodium_mg_max ?? 2300), u: "mg" },
               ].map((m, i) => (
-                <View key={i} style={s.trioCard}>
-                  <Text style={s.trioValue}>{Math.round(m.v)}{m.u}</Text>
-                  <Text style={s.trioLabel}>{m.l}</Text>
+                <Pressable key={i} onPress={flip} style={s.trioCard}>
+                  <Text style={s.trioValue}>
+                    {Math.round(mode === "left" ? Math.max(m.left, 0) : m.eaten)}{m.u}
+                  </Text>
+                  <Text style={s.trioLabel}>{m.name} {mode === "left" ? "LEFT" : "EATEN"}</Text>
                   <View style={{ marginTop: 10 }}>
                     <Ring size={30} stroke={4} pct={m.pct} color={m.c} />
                   </View>
-                </View>
+                </Pressable>
               ))}
             </View>
             <LinearGradient
