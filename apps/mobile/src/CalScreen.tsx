@@ -9,6 +9,7 @@ import {
   Dimensions,
   Modal,
   Pressable,
+  TextInput,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -201,6 +202,7 @@ export function CalScreen({
   const [openMeal, setOpenMeal] = useState<string | null>(null);
   const [waterSheet, setWaterSheet] = useState(false);
   const [waterAmt, setWaterAmt] = useState(0);
+  const [waterEdit, setWaterEdit] = useState(false);
   const [mode, setMode] = useState<"left" | "eaten">("left");
   const flip = () => setMode((m) => (m === "left" ? "eaten" : "left"));
   const pagerRef = useRef<ScrollView>(null);
@@ -498,6 +500,7 @@ export function CalScreen({
               </View>
               <Pressable onPress={() => {
                 setWaterAmt(0);
+                setWaterEdit(false);
                 setWaterSheet(true);
               }} style={s.smallBtn}>
                 <Text style={s.smallBtnText}>Log water</Text>
@@ -557,10 +560,30 @@ export function CalScreen({
         <Pressable style={s.sheetBackdrop} onPress={() => setWaterSheet(false)} />
         <View style={s.sheet}>
           <Text style={s.monoLabel}>LOG WATER</Text>
-          <Text style={s.sheetAmount}>
-            {waterAmt}
-            <Text style={{ fontSize: 14, color: C.dim }}>  mL</Text>
-          </Text>
+          {waterEdit ? (
+            <TextInput
+              style={s.sheetAmountInput}
+              autoFocus
+              keyboardType="number-pad"
+              defaultValue={waterAmt ? String(waterAmt) : ""}
+              placeholder="0"
+              placeholderTextColor={C.dim}
+              maxLength={4}
+              onEndEditing={(e) => {
+                const n = parseInt(e.nativeEvent.text, 10);
+                if (!Number.isNaN(n)) setWaterAmt(Math.max(0, Math.min(n, 2000)));
+                setWaterEdit(false);
+              }}
+              returnKeyType="done"
+            />
+          ) : (
+            <Pressable onPress={() => setWaterEdit(true)} hitSlop={6}>
+              <Text style={s.sheetAmount}>
+                {waterAmt}
+                <Text style={{ fontSize: 14, color: C.dim }}>  mL  ✎</Text>
+              </Text>
+            </Pressable>
+          )}
           <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
             {[
               { label: "+1 Glass", ml: 250, h: 16 },
@@ -996,6 +1019,17 @@ const s = StyleSheet.create({
     paddingBottom: 34,
   },
   sheetAmount: { fontFamily: "InstrumentSerif_400Regular", fontSize: 42, color: C.ink, marginTop: 8 },
+  sheetAmountInput: {
+    fontFamily: "InstrumentSerif_400Regular",
+    fontSize: 42,
+    color: C.ink,
+    marginTop: 8,
+    padding: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(199,184,255,0.4)",
+    alignSelf: "flex-start",
+    minWidth: 120,
+  },
   waterOpt: {
     flex: 1,
     alignItems: "center",
