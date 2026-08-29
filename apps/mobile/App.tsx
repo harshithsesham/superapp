@@ -20,6 +20,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { ConversationProvider } from "@elevenlabs/react-native";
 import { InterviewScreen } from "./src/InterviewScreen";
 import { NanoOrb } from "./src/NanoOrb";
 import { SduiScreen } from "./src/sdui/renderer";
@@ -97,7 +98,9 @@ function Boot() {
 export default function AppRoot() {
   return (
     <ErrorBoundary>
-      <App />
+      <ConversationProvider>
+        <App />
+      </ConversationProvider>
     </ErrorBoundary>
   );
 }

@@ -13,6 +13,7 @@ import {
   ExpoSpeechRecognitionModule,
   useSpeechRecognitionEvent,
 } from "expo-speech-recognition";
+import { useConversation } from "@elevenlabs/react-native";
 
 type OrbPhase = "idle" | "listening" | "thinking" | "speaking";
 type OrbMode = "converse" | "interview";
@@ -42,6 +43,9 @@ export function NanoOrb({
   const [progress, setProgress] = useState(0); // interview progress, 0 hides the bar
 
   const mode = useRef<OrbMode>("converse");
+  const rtActive = useRef(false);
+  const rtPoll = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rt = useConversation();
   const interviewSession = useRef<string | null>(null);
   const history = useRef<ConverseTurn[]>([]);
   const finalRef = useRef("");
@@ -101,6 +105,13 @@ export function NanoOrb({
   const collapse = useCallback(() => {
     openRef.current = false;
     if (speakTimer.current) clearTimeout(speakTimer.current);
+    if (rtPoll.current) clearInterval(rtPoll.current);
+    if (rtActive.current) {
+      rtActive.current = false;
+      try {
+        rt.endSession();
+      } catch {}
+    }
     try {
       ExpoSpeechRecognitionModule.stop();
     } catch {}
@@ -216,7 +227,7 @@ export function NanoOrb({
   );
 
   useSpeechRecognitionEvent("result", (e) => {
-    if (!openRef.current) return;
+    if (!openRef.current || rtActive.current) return;
     const best = e.results?.[0]?.transcript ?? "";
     const text = (finalRef.current + " " + best).trim();
     setTranscript(text);
@@ -226,7 +237,7 @@ export function NanoOrb({
     }
   });
   useSpeechRecognitionEvent("end", () => {
-    if (!openRef.current || phase !== "listening") return;
+    if (!openRef.current || rtActive.current || phase !== "listening") return;
     const heard = transcript.trim();
     if (heard && finalRef.current === "") {
       submit(heard);
@@ -238,13 +249,60 @@ export function NanoOrb({
     }
   });
   useSpeechRecognitionEvent("error", () => {
-    if (!openRef.current) return;
+    if (!openRef.current || rtActive.current) return;
     if (phase === "listening") {
       emptyListens.current += 1;
       if (emptyListens.current >= MAX_EMPTY_LISTENS) collapse();
       else setTimeout(() => listen(), 600);
     }
   });
+
+  const startRealtime = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`${apiUrl}/v1/voice/realtime-token`, { headers: auth });
+      if (!res.ok) return false;
+      const { token } = await res.json();
+      if (!token) return false;
+      const userToken = (auth.Authorization ?? "").replace(/^Bearer\s+/, "");
+      await rt.startSession({
+        conversationToken: token,
+        customLlmExtraBody: { user_token: userToken },
+        onMessage: ({ message, source }: { message: string; source: string }) => {
+          if (source === "user") setTranscript(message);
+          else setSay(message);
+        },
+        onDisconnect: () => {
+          if (rtActive.current) collapse();
+        },
+        onError: () => {},
+      } as never);
+      rtActive.current = true;
+      setPhase("listening");
+      // Client-side effects (navigate, interview) queue on the server.
+      rtPoll.current = setInterval(async () => {
+        try {
+          const r = await fetch(`${apiUrl}/v1/voice/pending-actions`, { headers: auth });
+          const { actions } = await r.json();
+          for (const a of actions ?? []) {
+            if (a.type === "open_screen" && a.screen) onNavigate(a.screen);
+            if (a.type === "refresh_inbox") onRefreshInbox();
+            if (a.type === "start_interview") {
+              rtActive.current = false;
+              try {
+                rt.endSession();
+              } catch {}
+              if (rtPoll.current) clearInterval(rtPoll.current);
+              startInterviewInOrb();
+            }
+            onActed?.();
+          }
+        } catch {}
+      }, 2500);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [apiUrl, auth, collapse, onActed, onNavigate, onRefreshInbox, rt, startInterviewInOrb]);
 
   const openOrb = useCallback(async () => {
     openRef.current = true;
@@ -255,6 +313,8 @@ export function NanoOrb({
       Animated.timing(glide, { toValue: 1, duration: 520, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
       Animated.timing(dim, { toValue: 1, duration: 520, useNativeDriver: true }),
     ]).start();
+    // Realtime first — live duplex talk. Fall back to the turn loop quietly.
+    if (await startRealtime()) return;
     try {
       const res = await fetch(`${apiUrl}/v1/voice/hello`, { method: "POST", headers: auth });
       const h = await res.json();
@@ -265,7 +325,7 @@ export function NanoOrb({
       }
     } catch {}
     listen();
-  }, [apiUrl, auth, listen, speakThen]);
+  }, [apiUrl, auth, listen, speakThen, startRealtime]);
 
   // Tap while it talks = interrupt: stop the audio, start listening.
   const onOrbTap = useCallback(() => {
@@ -273,7 +333,7 @@ export function NanoOrb({
       openOrb();
       return;
     }
-    if (phase === "speaking") {
+    if (!rtActive.current && phase === "speaking") {
       try {
         player.pause();
       } catch {}
@@ -283,6 +343,11 @@ export function NanoOrb({
       collapse();
     }
   }, [phase, openOrb, listen, collapse, player]);
+
+  useEffect(() => {
+    if (!rtActive.current) return;
+    setPhase(rt.isSpeaking ? "speaking" : "listening");
+  }, [rt.isSpeaking]);
 
   const scale = breath.interpolate({ inputRange: [0, 1], outputRange: [1, phase === "listening" ? 1.16 : 1.06] });
   const orbTranslateY = glide.interpolate({ inputRange: [0, 1], outputRange: [0, 190] });

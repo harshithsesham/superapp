@@ -27,6 +27,17 @@ def token_map() -> dict[str, str]:
     return m
 
 
+def resolve_token(db: Session, token: str) -> str | None:
+    """Resolve a raw bearer value to a user_id (static map, then sessions)."""
+    for known, user_id in token_map().items():
+        if hmac.compare_digest(token, known):
+            return user_id
+    user = resolve_session(db, token)
+    if user is not None:
+        db.commit()
+    return user
+
+
 def current_user_id(
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: Session = Depends(get_db),

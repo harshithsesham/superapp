@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     # Default IANA timezone for greetings/schedules until per-user tz facts exist.
     default_timezone: str = "America/Chicago"
 
+    # Realtime voice (ElevenLabs Agents, custom-LLM mode). The secret is what
+    # their platform presents to our /v1/llm endpoint; the agent id names the
+    # configured agent. Both empty = realtime off, orb falls back to turns.
+    realtime_secret: str = ""
+    eleven_agent_id: str = ""
+
     # Direct APNs (north star step 4): the .p8 signing key from the Apple
     # developer account. Empty path = pushes fall back to Expo token or no-op.
     apns_key_path: str = ""
