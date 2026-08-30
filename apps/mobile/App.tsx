@@ -31,6 +31,7 @@ import { InterviewScreen } from "./src/InterviewScreen";
 import { NanoOrb } from "./src/NanoOrb";
 import { CalScreen } from "./src/CalScreen";
 import { ScoutCard } from "./src/ScoutCard";
+import { FlightsScreen } from "./src/FlightsScreen";
 import { SduiScreen } from "./src/sdui/renderer";
 import { SDUI_VERSION } from "./src/sdui/types";
 import type { Screen } from "./src/sdui/types";
@@ -59,7 +60,7 @@ Notifications.setNotificationHandler({
   }),
 });
 
-const SCREENS = ["hub", "inbox", "home", "finance", "stylist"] as const;
+const SCREENS = ["hub", "inbox", "home", "finance", "stylist", "flights"] as const;
 type ScreenName = (typeof SCREENS)[number];
 
 // A crash must never be a black screen: show the error and offer a retry.
@@ -563,7 +564,7 @@ function App() {
       >
         {error ? (
           <Text style={styles.error}>{error}</Text>
-        ) : screenName === "home" ? null : screen ? (
+        ) : screenName === "home" || screenName === "flights" ? null : screen ? (
           <>
             <SduiScreen
               screen={screen}
@@ -574,13 +575,29 @@ function App() {
               onFix={onFixMeal}
             />
             {screenName === "hub" ? (
-              <ScoutCard apiUrl={apiUrl} auth={AUTH} dark={dark} />
+              <ScoutCard
+                apiUrl={apiUrl}
+                auth={AUTH}
+                dark={dark}
+                onOpenFlights={() => setScreenName("flights")}
+              />
             ) : null}
           </>
         ) : (
           <ActivityIndicator style={{ marginTop: 64 }} />
         )}
       </ScrollView>
+
+      {screenName === "flights" && !error ? (
+        <View style={{ position: "absolute", top: 60, left: 0, right: 0, bottom: 0 }}>
+          <FlightsScreen
+            apiUrl={apiUrl}
+            auth={AUTH}
+            onBack={() => setScreenName("hub")}
+            onOpenOrb={() => setOrbSignal((n) => n + 1)}
+          />
+        </View>
+      ) : null}
 
       {screenName === "home" && !error ? (
         <View style={{ position: "absolute", top: 60, left: 0, right: 0, bottom: 0 }}>

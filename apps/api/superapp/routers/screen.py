@@ -17,7 +17,10 @@ router = APIRouter(prefix="/v1", tags=["screens"])
 
 # Which agent renders which screen. Deterministic routing — the orchestrator
 # only exists for the chat surface (Phase 5), not for screens.
-SCREEN_AGENTS = {"hub": "hub", "home": "nutrition", "finance": "finance", "stylist": "stylist", "inbox": "inbox"}
+SCREEN_AGENTS = {"hub": "hub", "home": "nutrition", "finance": "finance",
+                 "stylist": "stylist", "inbox": "inbox",
+                 # flights is a native client screen; hub supplies theme only
+                 "flights": "hub"}
 
 
 def _screen_agent(name: str) -> str:

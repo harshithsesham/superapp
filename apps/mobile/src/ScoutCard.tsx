@@ -35,10 +35,12 @@ export function ScoutCard({
   apiUrl,
   auth,
   dark,
+  onOpenFlights,
 }: {
   apiUrl: string;
   auth: Record<string, string>;
   dark: boolean;
+  onOpenFlights?: () => void;
 }) {
   const [tasks, setTasks] = useState<ScoutTask[]>([]);
   const [draft, setDraft] = useState("");
@@ -94,7 +96,14 @@ export function ScoutCard({
 
   return (
     <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      <Text style={[styles.label, { color: c.muted }]}>SCOUT</Text>
+      <View style={styles.headerRow}>
+        <Text style={[styles.label, { color: c.muted }]}>SCOUT</Text>
+        {onOpenFlights ? (
+          <Pressable onPress={onOpenFlights} hitSlop={8}>
+            <Text style={[styles.flightsLink, { color: c.accentText }]}>✈  Flights  ›</Text>
+          </Pressable>
+        ) : null}
+      </View>
       <Text style={[styles.sub, { color: c.muted }]}>
         Send it to find something on the open web — resale sites and retailers.
         Read-only, no logins.
@@ -201,7 +210,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 16,
   },
+  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   label: { fontFamily: "InstrumentSans_600SemiBold", fontSize: 12, letterSpacing: 2 },
+  flightsLink: { fontFamily: "InstrumentSans_600SemiBold", fontSize: 13 },
   sub: { fontSize: 13, lineHeight: 18, marginTop: 6 },
   inputRow: {
     flexDirection: "row",

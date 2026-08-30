@@ -92,7 +92,7 @@ CONVERSE_SYSTEM = (
     "When they wrap up (goodbye, that's all, thanks I'm done): "
     "action=end_conversation with a short warm sign-off in say.\n"
     "Navigation requests: action=open_screen with screen "
-    "(hub|inbox|home|finance|stylist). Mail check: action=refresh_inbox. "
+    "(hub|inbox|home|finance|stylist|flights). Mail check: action=refresh_inbox. "
     "They agree to the get-to-know-you conversation: action=start_interview.\n"
     "Set listen=true whenever you ask a question or the conversation is "
     "mid-task; listen=false when your reply naturally ends the exchange."
@@ -107,7 +107,7 @@ CONVERSE_SCHEMA = {
                                  "draft_reply", "send_draft", "send_new_email",
                                  "set_nutrition", "log_water", "research_task",
                                  "connect_site", "end_conversation"]},
-        "screen": {"type": "string", "enum": ["hub", "inbox", "home", "finance", "stylist", ""]},
+        "screen": {"type": "string", "enum": ["hub", "inbox", "home", "finance", "stylist", "flights", ""]},
         "draft_id": {"type": "string"},
         "message_id": {"type": "string"},
         "reply_body": {"type": "string"},
@@ -206,6 +206,7 @@ def _stub_converse(user_text: str, voice_inbox: dict) -> dict:
         return {**base, "action_type": "send_draft", "draft_id": asks[0]["draft_id"],
                 "say": "Sent."}
     for screen, words in [("inbox", ("mail", "email", "inbox")), ("home", ("meal", "food")),
+                          ("flights", ("flight", "flights")),
                           ("finance", ("money", "spend")), ("stylist", ("wear", "outfit")),
                           ("hub", ("hub", "overview"))]:
         if any(w in t for w in words):
