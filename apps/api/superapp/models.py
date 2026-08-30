@@ -7,7 +7,8 @@ Phase 0 ships the cross-domain core: user_facts + events. Domain twins
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, Index, String, Text, UniqueConstraint
+from sqlalchemy import (JSON, Boolean, DateTime, Float, Index, Integer, String,
+                        Text, UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -19,6 +20,22 @@ def _uuid() -> str:
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class FlightWatch(Base):
+    """The Flycatcher: a standing flight-price watch. The scout re-checks it
+    daily; the person hears about it only on a new low or a hit target."""
+
+    __tablename__ = "flight_watches"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    instruction: Mapped[str] = mapped_column(Text, nullable=False)
+    target_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    best_price: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class AgentTask(Base):
@@ -38,6 +55,7 @@ class AgentTask(Base):
     status: Mapped[str] = mapped_column(String(16), default="queued")  # queued|running|done|failed
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    watch_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

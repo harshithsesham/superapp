@@ -901,3 +901,44 @@ def test_reactions_land_in_events():
     kinds = [e.type for e in recent_events(db, user_id="harshith", limit=20)]
     assert "insight_dismissed" in kinds
     db.close()
+
+
+def test_flight_watch_lifecycle():
+    import superapp.config as config_module
+    settings = config_module.get_settings()
+    settings.worker_token = "wk-test-token"
+    W = {"Authorization": "Bearer wk-test-token"}
+    try:
+        # Create a watch with a target: first check is queued immediately.
+        w = client.post("/v1/tasks/watch", headers=AUTH, json={
+            "instruction": "watch flights from Columbus to Hyderabad in December",
+            "target_price": 900}).json()
+        assert w["id"] and w["first_check"]
+
+        # Tick doesn't double-queue while a check is pending.
+        assert client.post("/v1/tasks/flight-watch-tick", headers=W).json()["queued"] == 0
+
+        # First check completes at $1,150: baseline only, no deal push event.
+        nxt = client.get("/v1/tasks/next", headers=W).json()["task"]
+        client.post(f"/v1/tasks/{nxt['id']}/complete", headers=W, json={"result": {
+            "summary": "22 options", "caveats": "",
+            "shortlist": [{"title": "Qatar, 1 stop", "price": "$1,150 round trip",
+                           "location": "CMH-HYD", "url": "https://g", "why": "cheapest"}]}})
+        watches = client.get("/v1/tasks/watches", headers=AUTH).json()["watches"]
+        assert watches[0]["best_price"] == 1150
+
+        # Tick queues a fresh check; a drop to $890 (under target) updates best.
+        assert client.post("/v1/tasks/flight-watch-tick", headers=W).json()["queued"] == 1
+        nxt = client.get("/v1/tasks/next", headers=W).json()["task"]
+        client.post(f"/v1/tasks/{nxt['id']}/complete", headers=W, json={"result": {
+            "summary": "drop", "caveats": "",
+            "shortlist": [{"title": "Qatar, 1 stop", "price": "$890 round trip",
+                           "location": "CMH-HYD", "url": "https://g", "why": "cheapest"}]}})
+        watches = client.get("/v1/tasks/watches", headers=AUTH).json()["watches"]
+        assert watches[0]["best_price"] == 890
+
+        # Stop the watch; tick then queues nothing.
+        assert client.delete(f"/v1/tasks/watch/{w['id']}", headers=AUTH).json()["ok"]
+        assert client.post("/v1/tasks/flight-watch-tick", headers=W).json()["queued"] == 0
+    finally:
+        settings.worker_token = ""

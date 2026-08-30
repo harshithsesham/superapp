@@ -59,6 +59,12 @@ CONVERSE_SYSTEM = (
     "scout (e.g. 'connect facebook'): action=connect_site, reply_body=site "
     "name. Tell them a login window will be ready in under a minute at their "
     "scout link, and it stays open twenty minutes.\n"
+    "FLIGHT WATCHES (the Flycatcher): when they ask to WATCH or TRACK flight "
+    "prices over time ('watch flights to Hyderabad in December', 'tell me when "
+    "it drops under $900'), emit action=research_task with reply_body starting "
+    "with 'watch flights' plus route, dates, and any target price. Tell them "
+    "you'll check daily and only ping them on a real drop. A one-time 'find me "
+    "flights' (no watching) is a normal errand, not a watch.\n"
     "RESEARCH ERRANDS: when they ask you to find/search/scout something out "
     "in the world (homes, used goods, prices, options — anything needing the "
     "web), emit action=research_task with reply_body = a crisp self-contained "
@@ -256,9 +262,27 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
                      payload={"task_id": task.id, "kind": "connect_login", "site": site})
         return {}
     if action == "research_task" and parsed.get("reply_body"):
-        from ..models import AgentTask
+        import re as _re
+
+        from ..models import AgentTask, FlightWatch
         instruction = parsed["reply_body"][:1000].strip()
-        kind = "marketplace" if "marketplace" in instruction.lower() else "research"
+        if (_re.search(r"\b(watch|track|alert|monitor)\b", instruction, _re.I)
+                and _re.search(r"\bflights?\b", instruction, _re.I)):
+            m = _re.search(r"(?:under|below|target)\s*\$?\s*(\d[\d,]*)",
+                           instruction, _re.I)
+            target = int(m.group(1).replace(",", "")) if m else None
+            watch = FlightWatch(user_id=user_id, instruction=instruction[:500],
+                                target_price=target)
+            db.add(watch)
+            db.flush()
+            db.add(AgentTask(user_id=user_id, kind="flights",
+                             instruction=watch.instruction, watch_id=watch.id))
+            append_event(db, user_id=user_id, type="task_queued", agent="orb",
+                         payload={"watch_id": watch.id, "kind": "flight_watch",
+                                  "instruction": watch.instruction[:200]})
+            return {}
+        kind = "flights" if _re.search(r"\bflights?\b", instruction, _re.I) else (
+            "marketplace" if "marketplace" in instruction.lower() else "research")
         task = AgentTask(user_id=user_id, kind=kind, instruction=instruction)
         db.add(task)
         db.flush()

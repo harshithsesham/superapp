@@ -6,6 +6,7 @@ Completion pushes to the lock screen and lands in the event ledger, so the
 Hub timeline and the orb both know what was found.
 """
 import hmac
+import re
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session
 from ..auth import current_user_id
 from ..config import get_settings
 from ..db import get_db
-from ..models import AgentTask, utcnow
+from ..models import AgentTask, FlightWatch, utcnow
 from ..push import send_push
 from ..substrate.events import append_event
 
@@ -66,6 +67,103 @@ def list_tasks(user_id: str = Depends(current_user_id), db: Session = Depends(ge
     } for t in rows]}
 
 
+# ---- flight watches (the Flycatcher) ---------------------------------------
+
+_PRICE_NUM = re.compile(r"\$\s*([\d,]+)")
+
+
+def _min_price(result: dict | None) -> int | None:
+    prices = []
+    for item in (result or {}).get("shortlist", []):
+        m = _PRICE_NUM.search(str(item.get("price", "")))
+        if m:
+            prices.append(int(m.group(1).replace(",", "")))
+    return min(prices) if prices else None
+
+
+class NewWatch(BaseModel):
+    instruction: str = Field(min_length=8, max_length=500)
+    target_price: int | None = Field(default=None, ge=1, le=100000)
+
+
+@router.post("/watch")
+def create_watch(body: NewWatch, user_id: str = Depends(current_user_id),
+                 db: Session = Depends(get_db)):
+    watch = FlightWatch(user_id=user_id, instruction=body.instruction.strip(),
+                        target_price=body.target_price)
+    db.add(watch)
+    db.flush()
+    task = AgentTask(user_id=user_id, kind="flights",
+                     instruction=watch.instruction, watch_id=watch.id)
+    db.add(task)
+    append_event(db, user_id=user_id, type="task_queued", agent="scout",
+                 payload={"watch_id": watch.id, "kind": "flight_watch",
+                          "instruction": watch.instruction[:200]})
+    db.commit()
+    return {"id": watch.id, "first_check": task.id}
+
+
+@router.get("/watches")
+def list_watches(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    rows = db.scalars(select(FlightWatch).where(FlightWatch.user_id == user_id,
+                                                FlightWatch.active.is_(True))
+                      .order_by(FlightWatch.created_at.desc()).limit(10))
+    return {"watches": [{
+        "id": w.id, "instruction": w.instruction, "target_price": w.target_price,
+        "best_price": w.best_price, "created_at": w.created_at.isoformat(),
+    } for w in rows]}
+
+
+@router.delete("/watch/{watch_id}")
+def stop_watch(watch_id: str, user_id: str = Depends(current_user_id),
+               db: Session = Depends(get_db)):
+    watch = db.get(FlightWatch, watch_id)
+    if watch is None or watch.user_id != user_id:
+        raise HTTPException(status_code=404, detail="No such watch")
+    watch.active = False
+    watch.updated_at = utcnow()
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/flight-watch-tick", dependencies=[Depends(_worker_auth)])
+def flight_watch_tick(db: Session = Depends(get_db)):
+    """Cron calls this daily: queue one fresh check per active watch."""
+    queued = 0
+    for watch in db.scalars(select(FlightWatch).where(FlightWatch.active.is_(True))):
+        pending = db.scalar(select(AgentTask).where(
+            AgentTask.watch_id == watch.id,
+            AgentTask.status.in_(("queued", "running"))).limit(1))
+        if pending is not None:
+            continue
+        db.add(AgentTask(user_id=watch.user_id, kind="flights",
+                         instruction=watch.instruction, watch_id=watch.id))
+        queued += 1
+    db.commit()
+    return {"queued": queued}
+
+
+def _settle_watch_check(db: Session, task: AgentTask, result: dict) -> None:
+    """A watch check landed: push only on a hit target or a new low."""
+    watch = db.get(FlightWatch, task.watch_id)
+    if watch is None or not watch.active:
+        return
+    price = _min_price(result)
+    watch.updated_at = utcnow()
+    if price is None:
+        return
+    hit_target = watch.target_price is not None and price <= watch.target_price
+    new_low = watch.best_price is None or price < watch.best_price
+    prev_best = watch.best_price
+    watch.best_price = price if new_low else watch.best_price
+    if hit_target or (new_low and prev_best is not None):
+        was = f" (was ${prev_best})" if prev_best is not None else ""
+        send_push(db, user_id=watch.user_id, title="Nano — flight deal",
+                  body=f"{watch.instruction[:80]}: now ${price}{was}. "
+                       "Open the scout card to book.",
+                  agent="scout")
+
+
 # ---- worker side -----------------------------------------------------------
 
 @router.get("/next", dependencies=[Depends(_worker_auth)])
@@ -101,6 +199,10 @@ def complete_task(task_id: str, body: TaskResult, db: Session = Depends(get_db))
                  payload={"task_id": task.id,
                           "summary": str(body.result.get("summary", ""))[:300],
                           "found": len(body.result.get("shortlist", []))})
+    if task.watch_id:
+        _settle_watch_check(db, task, body.result)
+        db.commit()
+        return {"ok": True}
     n = len(body.result.get("shortlist", []))
     summary = str(body.result.get("summary", "")).strip()
     if body.result.get("connect"):

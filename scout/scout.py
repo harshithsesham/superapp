@@ -17,6 +17,7 @@ import json
 import os
 import re
 import time
+from urllib.parse import quote
 
 import httpx
 from aiohttp import WSMsgType, web
@@ -48,6 +49,15 @@ MARKET_SYSTEM = (
     "the links list), and a one-line why. Never invent listings. If the page "
     "looks like a login wall or checkpoint, say so in caveats and return an "
     "empty shortlist."
+)
+FLIGHTS_SYSTEM = (
+    "You are Nano's scout (the Flycatcher) reading Google Flights results text "
+    "for a flight errand. Extract the REAL itineraries visible: for each, "
+    "title = airline(s) + stops + duration, price = the dollar amount shown, "
+    "location = route and dates as shown, why = one line (cheapest / nonstop / "
+    "best times). Cheapest first. Never invent flights or prices. If the page "
+    "shows a consent wall, captcha, or no results, say so in caveats and "
+    "return an empty shortlist."
 )
 STEP_SCHEMA = {
     "type": "object",
@@ -213,7 +223,7 @@ def _llm(messages, schema, system):
 
     client = Anthropic(api_key=ANTHROPIC_KEY)
     resp = client.messages.create(
-        model=MODEL, max_tokens=2000,
+        model=MODEL, max_tokens=3500,
         system=[{"type": "text", "text": system,
                  "cache_control": {"type": "ephemeral"}}],
         messages=messages,
@@ -285,6 +295,38 @@ async def run_marketplace(context, instruction: str) -> dict:
         await page.close()
 
 
+# ---- flights: Google Flights read, no APIs (the Flycatcher) -----------------
+
+async def run_flights(context, instruction: str) -> dict:
+    q = re.sub(r"^(find|search|watch|track|scout|check)\s+", "",
+               instruction.strip(), flags=re.I)
+    url = "https://www.google.com/travel/flights?q=" + quote(q)
+    page = await context.new_page()
+    try:
+        await page.goto(url, timeout=45000, wait_until="domcontentloaded")
+        await page.wait_for_timeout(9000)  # results render after load
+        body = await page.evaluate("document.body ? document.body.innerText : ''")
+        body = re.sub(r"\n{3,}", "\n\n", body)[:9000]
+        if not ANTHROPIC_KEY:
+            return {"summary": "(stub) flights read", "shortlist": [], "caveats": "stub"}
+        text = await asyncio.to_thread(
+            _llm,
+            [{"role": "user", "content": json.dumps(
+                {"errand": instruction, "page_text": body}, ensure_ascii=False)}],
+            MARKET_SCHEMA, FLIGHTS_SYSTEM)
+        parsed = json.loads(text)
+        short = parsed["shortlist"][:6]
+        for item in short:
+            item["url"] = url  # tap-to-book: the same live search on Google Flights
+        return {"summary": parsed["summary"][:400], "shortlist": short,
+                "caveats": parsed["caveats"][:300]}
+    except Exception as exc:  # noqa: BLE001
+        return {"summary": "Flight search failed.", "shortlist": [],
+                "caveats": f"{type(exc).__name__}: {exc}"[:250]}
+    finally:
+        await page.close()
+
+
 # ---- main loop --------------------------------------------------------------
 
 async def handle_task(context, task: dict) -> dict:
@@ -301,6 +343,8 @@ async def handle_task(context, task: dict) -> dict:
         return {"summary": f"Login window is open for {site} — you have 20 minutes.",
                 "shortlist": [], "caveats": "one-time; the session sticks after login",
                 "connect": True}
+    if kind == "flights" or re.search(r"\bflights?\b", instruction, re.I):
+        return await run_flights(context, instruction)
     if kind == "marketplace" or "marketplace" in instruction.lower():
         return await run_marketplace(context, instruction)
     return await run_research(context, instruction)
