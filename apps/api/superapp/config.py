@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     # Default IANA timezone for greetings/schedules until per-user tz facts exist.
     default_timezone: str = "America/Chicago"
 
+    # The scout worker authenticates with this to pull/complete tasks.
+    worker_token: str = ""
+
     # Realtime voice (ElevenLabs Agents, custom-LLM mode). The secret is what
     # their platform presents to our /v1/llm endpoint; the agent id names the
     # configured agent. Both empty = realtime off, orb falls back to turns.

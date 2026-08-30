@@ -21,6 +21,27 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class AgentTask(Base):
+    """The scout's queue: web-research errands the person spoke into being.
+    Results are structured shortlists; every state change is an event."""
+
+    __tablename__ = "agent_tasks"
+    __table_args__ = (
+        Index("ix_tasks_user", "user_id", "created_at"),
+        Index("ix_tasks_status", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), default="research")
+    instruction: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="queued")  # queued|running|done|failed
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class Decision(Base):
     """The decision ledger (north star step 3) — every judgment call, typed.
 

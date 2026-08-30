@@ -25,7 +25,8 @@ from ..db import get_db
 from ..memory import recall
 from ..substrate import get_context
 from ..substrate.events import append_event
-from .voice import CONVERSE_SYSTEM, _execute, _inbox_for_voice, _nutrition_for_voice
+from .voice import (CONVERSE_SYSTEM, _execute, _inbox_for_voice,
+                    _nutrition_for_voice, _tasks_for_voice)
 
 router = APIRouter(tags=["realtime"])
 
@@ -39,7 +40,7 @@ REALTIME_SYSTEM = (
     '<<action:{"type":"open_screen","screen":"inbox"}>> — types: open_screen '
     "(screen), refresh_inbox, draft_reply (message_id, reply_body, draft_id "
     "if editing), send_draft (draft_id), send_new_email (to_addr, subject, "
-    "reply_body), set_nutrition (profile_json), log_water (reply_body=ml), start_interview. The tag is "
+    "reply_body), set_nutrition (profile_json), log_water (reply_body=ml), research_task (reply_body=instruction), start_interview. The tag is "
     "silent; everything before it "
     "is spoken. Same rules as ever: send only on an explicit yes, never "
     "invent addresses or facts."
@@ -113,6 +114,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db),
         "conversation": turns[-16:],
         "inbox": _inbox_for_voice(context),
         "nutrition": _nutrition_for_voice(context),
+        "scout_tasks": _tasks_for_voice(db, user_id),
         "remembered": recall(db, user_id=user_id, query=last_user or "today", k=4),
         "person": [f for f in context.facts if f["domain"] in ("identity", "inbox", "goals")][:12],
         "knows_person": any(f["domain"] == "identity" for f in context.facts),
@@ -173,7 +175,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db),
         kind = payload.get("type", "")
         # Server-side effects reuse the converse executor verbatim.
         if kind in ("draft_reply", "send_draft", "send_new_email", "set_nutrition",
-                    "log_water"):
+                    "log_water", "research_task"):
             from ..db import SessionLocal
 
             adb = SessionLocal()

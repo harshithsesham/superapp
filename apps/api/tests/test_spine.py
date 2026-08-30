@@ -715,6 +715,39 @@ def test_cal_neo_onboarding_flow():
     assert 5 <= s100 <= 100 and "meal" in note
 
 
+def test_scout_task_queue_roundtrip():
+    import superapp.config as config_module
+    settings = config_module.get_settings()
+    settings.worker_token = "wk-test-token"
+    W = {"Authorization": "Bearer wk-test-token"}
+    try:
+        # Queue by voice-style instruction; worker pulls, completes; push+event land.
+        t = client.post("/v1/tasks", headers=AUTH,
+                        json={"instruction": "find 3 used tennis rackets under $100 nearby"}).json()
+        assert t["status"] == "queued"
+
+        assert client.get("/v1/tasks/next").status_code == 401  # worker auth required
+        nxt = client.get("/v1/tasks/next", headers=W).json()["task"]
+        assert nxt["id"] == t["id"] and nxt["instruction"].startswith("find 3")
+
+        r = client.post(f"/v1/tasks/{t['id']}/complete", headers=W, json={"result": {
+            "summary": "Two solid rackets at $60 and $85.",
+            "shortlist": [{"title": "Wilson Pro", "price": "$60", "location": "5 km",
+                           "url": "https://x", "why": "barely used"}],
+            "caveats": ""}})
+        assert r.json()["ok"]
+
+        mine = client.get("/v1/tasks", headers=AUTH).json()["tasks"][0]
+        assert mine["status"] == "done" and mine["result"]["shortlist"]
+
+        db = SessionLocal()
+        events = recent_events(db, user_id="harshith", limit=5, types=["task_completed"])
+        assert events and events[0].payload["found"] == 1
+        db.close()
+    finally:
+        settings.worker_token = ""
+
+
 def test_draft_card_explains_why_it_wrote_this():
     screen = client.get("/v1/screen/inbox", headers=AUTH).json()
     card = next(b for sec in screen["sections"] for b in sec["blocks"]

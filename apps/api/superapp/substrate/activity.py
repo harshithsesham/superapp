@@ -20,6 +20,8 @@ _VERDICTS = {
     "draft_sent": ("SENT WITH YOUR YES", "did"),
     "style_distilled": ("LEARNED YOUR TASTE", "did"),
     "reply_style_distilled": ("LEARNED YOUR VOICE", "did"),
+    "task_completed": ("SCOUTED THE WEB", "did"),
+    "task_queued": ("ERRAND TAKEN", "did"),
 }
 _NOISE = ("llm_call", "screen_view", "agent_run", "inbox_synced", "push_sent")
 
@@ -67,6 +69,8 @@ def activity_context(db: Session, user_id: str) -> dict:
             "meal_estimated": f"Logged a meal — {e.payload.get('kcal', '?')} kcal",
             "outfits_generated": f"Prepared {e.payload.get('count', '')} looks for today",
             "draft_sent": "A reply left with your yes",
+            "task_completed": f"Scouted: {e.payload.get('summary', '')[:70]}",
+            "task_queued": f"Errand: {e.payload.get('instruction', '')[:70]}",
             "transactions_synced": f"{e.payload.get('new', 0)} new transactions reconciled",
         }.get(e.type, e.type.replace("_", " ").capitalize())
         items.append({"text": label, "verdict": verdict, "tone": tone,

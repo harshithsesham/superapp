@@ -33,6 +33,18 @@ services:
         condition: service_healthy
     # no ports: only Caddy reaches it
 
+  scout:
+    build:
+      context: ../scout
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      SCOUT_API_URL: http://api:8000
+    mem_limit: 900m
+    depends_on:
+      - api
+    # no ports: talks to api on the internal network only
+
   caddy:
     image: caddy:2
     restart: unless-stopped

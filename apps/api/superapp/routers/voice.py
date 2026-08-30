@@ -55,6 +55,13 @@ CONVERSE_SYSTEM = (
     "sending THAT draft: action=send_new_email with to_addr, subject, "
     "reply_body. New recipients always get this read-back-and-confirm, "
     "no exceptions.\n"
+    "RESEARCH ERRANDS: when they ask you to find/search/scout something out "
+    "in the world (homes, used goods, prices, options — anything needing the "
+    "web), emit action=research_task with reply_body = a crisp self-contained "
+    "instruction (what, where, budget, constraints). Tell them you're on it "
+    "and will ping them when the shortlist is ready. scout_tasks in context "
+    "holds recent errands and their results — answer 'what did you find' "
+    "from there, reading the shortlist naturally.\n"
     "nutrition in context is their live day — plan targets, what they ate, "
     "kcal_left, water — answer calorie/macro/water questions from it with "
     "real numbers, never estimates of your own.\n"
@@ -88,7 +95,8 @@ CONVERSE_SCHEMA = {
         "action_type": {"type": "string",
                         "enum": ["none", "open_screen", "refresh_inbox", "start_interview",
                                  "draft_reply", "send_draft", "send_new_email",
-                                 "set_nutrition", "log_water", "end_conversation"]},
+                                 "set_nutrition", "log_water", "research_task",
+                                 "end_conversation"]},
         "screen": {"type": "string", "enum": ["hub", "inbox", "home", "finance", "stylist", ""]},
         "draft_id": {"type": "string"},
         "message_id": {"type": "string"},
@@ -111,6 +119,18 @@ class Turn(BaseModel):
 
 class ConverseBody(BaseModel):
     messages: list[Turn] = Field(min_length=1, max_length=40)
+
+
+def _tasks_for_voice(db, user_id: str) -> list[dict]:
+    from sqlalchemy import select
+
+    from ..models import AgentTask
+
+    rows = db.scalars(select(AgentTask).where(AgentTask.user_id == user_id)
+                      .order_by(AgentTask.created_at.desc()).limit(3))
+    return [{"instruction": t.instruction[:150], "status": t.status,
+             "result": t.result if t.status == "done" else None,
+             "error": t.error} for t in rows]
 
 
 def _nutrition_for_voice(context) -> dict:
@@ -221,6 +241,16 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
         append_event(db, user_id=user_id, type="nutrition_plan_set", agent="orb",
                      domain="nutrition", payload={k: plan[k] for k in ("kcal", "goal")})
         return {}
+    if action == "research_task" and parsed.get("reply_body"):
+        from ..models import AgentTask
+        task = AgentTask(user_id=user_id, kind="research",
+                         instruction=parsed["reply_body"][:1000].strip())
+        db.add(task)
+        db.flush()
+        append_event(db, user_id=user_id, type="task_queued", agent="orb",
+                     payload={"task_id": task.id, "instruction": task.instruction[:200],
+                              "via": "voice"})
+        return {}
     if action == "log_water":
         try:
             ml = max(50, min(2000, int(float(parsed.get("reply_body") or 250))))
@@ -319,6 +349,7 @@ def converse(body: ConverseBody, user_id: str = Depends(current_user_id),
             "conversation": [t.model_dump() for t in body.messages[-16:]],
             "inbox": voice_inbox,
             "nutrition": _nutrition_for_voice(context),
+            "scout_tasks": _tasks_for_voice(db, user_id),
             "remembered": recall(db, user_id=user_id,
                                  query=body.messages[-1].text, k=4),
             "person": [f for f in context.facts if f["domain"] in ("identity", "inbox", "goals")][:12],
