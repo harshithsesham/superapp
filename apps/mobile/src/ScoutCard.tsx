@@ -1,13 +1,15 @@
-// The scout's home in the app: connect Facebook with one tap (opens the
-// streamed login window in Safari) and see what the scout found, tappable.
+// The scout's home in the app: kick off a find-it errand and see what it
+// found, tappable. No account logins — the scout works the open web
+// (resale marketplaces, retailers) read-only, so nothing puts your
+// accounts at risk.
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Linking,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
@@ -39,21 +41,19 @@ export function ScoutCard({
   dark: boolean;
 }) {
   const [tasks, setTasks] = useState<ScoutTask[]>([]);
-  const [loginUrl, setLoginUrl] = useState<string | null>(null);
-  const [connecting, setConnecting] = useState<"idle" | "arming">("idle");
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
   const alive = useRef(true);
 
-  const fetchTasks = useCallback(async (): Promise<ScoutTask[]> => {
+  const fetchTasks = useCallback(async () => {
     try {
       const res = await fetch(`${apiUrl}/v1/tasks`, { headers: auth });
-      if (!res.ok) return [];
+      if (!res.ok) return;
       const data = await res.json();
-      if (!alive.current) return [];
-      setLoginUrl(data.login_url ?? null);
+      if (!alive.current) return;
       setTasks(data.tasks ?? []);
-      return data.tasks ?? [];
     } catch {
-      return [];
+      /* offline — keep last known */
     }
   }, [apiUrl, auth]);
 
@@ -67,69 +67,62 @@ export function ScoutCard({
     };
   }, [fetchTasks]);
 
-  const connectFacebook = useCallback(async () => {
-    if (connecting !== "idle") return;
-    setConnecting("arming");
+  const sendErrand = useCallback(async () => {
+    const instruction = draft.trim();
+    if (instruction.length < 8 || sending) return;
+    setSending(true);
     try {
       const res = await fetch(`${apiUrl}/v1/tasks`, {
         method: "POST",
         headers: { ...auth, "Content-Type": "application/json" },
-        body: JSON.stringify({ instruction: "connect facebook", kind: "connect_login" }),
+        body: JSON.stringify({ instruction, kind: "research" }),
       });
       if (!res.ok) throw new Error("queue failed");
-      const { id } = await res.json();
-      // The scout picks the task up within ~12s and opens the login page.
-      for (let i = 0; i < 15; i++) {
-        await new Promise((r) => setTimeout(r, 3000));
-        if (!alive.current) return;
-        const list = await fetchTasks();
-        const mine = list.find((t) => t.id === id);
-        if (mine?.status === "done") {
-          if (loginUrl) Linking.openURL(loginUrl);
-          setConnecting("idle");
-          return;
-        }
-        if (mine?.status === "failed") throw new Error(mine.error ?? "failed");
-      }
-      throw new Error("timed out");
+      setDraft("");
+      // Give the poller a beat to flip it to running.
+      setTimeout(fetchTasks, 1500);
+      await fetchTasks();
     } catch {
-      if (alive.current) {
-        setConnecting("idle");
-        Alert.alert("Couldn't open the login window", "Give it a minute and try again.");
-      }
+      Alert.alert("Couldn't send that errand", "Give it a minute and try again.");
+    } finally {
+      if (alive.current) setSending(false);
     }
-  }, [apiUrl, auth, connecting, fetchTasks, loginUrl]);
+  }, [apiUrl, auth, draft, fetchTasks, sending]);
 
   const c = dark ? palette.dark : palette.light;
   const errands = tasks.filter((t) => t.kind !== "connect_login").slice(0, 3);
 
   return (
     <View style={[styles.card, { backgroundColor: c.card, borderColor: c.border }]}>
-      <View style={styles.headerRow}>
-        <Text style={[styles.label, { color: c.muted }]}>SCOUT</Text>
+      <Text style={[styles.label, { color: c.muted }]}>SCOUT</Text>
+      <Text style={[styles.sub, { color: c.muted }]}>
+        Send it to find something on the open web — resale sites and retailers.
+        Read-only, no logins.
+      </Text>
+
+      <View style={[styles.inputRow, { borderColor: c.border }]}>
+        <TextInput
+          style={[styles.input, { color: c.text }]}
+          placeholder="find a used standing desk under $150"
+          placeholderTextColor={c.muted}
+          value={draft}
+          onChangeText={setDraft}
+          onSubmitEditing={sendErrand}
+          returnKeyType="send"
+          editable={!sending}
+        />
         <Pressable
-          style={[styles.connectBtn, { backgroundColor: c.accent }]}
-          onPress={connectFacebook}
-          disabled={connecting !== "idle"}
+          style={[styles.sendBtn, { backgroundColor: c.accent, opacity: draft.trim().length < 8 ? 0.4 : 1 }]}
+          onPress={sendErrand}
+          disabled={sending || draft.trim().length < 8}
         >
-          {connecting === "arming" ? (
-            <ActivityIndicator size="small" color={c.onAccent} />
-          ) : (
-            <Text style={[styles.connectText, { color: c.onAccent }]}>
-              Log in to Facebook
-            </Text>
-          )}
+          <Text style={[styles.sendText, { color: c.onAccent }]}>{sending ? "…" : "Find"}</Text>
         </Pressable>
       </View>
-      {connecting === "arming" ? (
-        <Text style={[styles.hint, { color: c.muted }]}>
-          Opening your login window — Safari will open in ~20 seconds…
-        </Text>
-      ) : null}
 
-      {errands.length === 0 && connecting === "idle" ? (
+      {errands.length === 0 ? (
         <Text style={[styles.hint, { color: c.muted }]}>
-          Ask the orb: “find a used desk under $100 on marketplace”.
+          Or just ask the orb: “find a used desk under $150”.
         </Text>
       ) : null}
 
@@ -208,16 +201,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 16,
   },
-  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   label: { fontFamily: "InstrumentSans_600SemiBold", fontSize: 12, letterSpacing: 2 },
-  connectBtn: {
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    minWidth: 132,
+  sub: { fontSize: 13, lineHeight: 18, marginTop: 6 },
+  inputRow: {
+    flexDirection: "row",
     alignItems: "center",
+    gap: 8,
+    marginTop: 12,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingLeft: 12,
+    paddingRight: 6,
+    paddingVertical: 4,
   },
-  connectText: { fontFamily: "InstrumentSans_600SemiBold", fontSize: 13 },
+  input: { flex: 1, fontSize: 14, paddingVertical: 8 },
+  sendBtn: { borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 },
+  sendText: { fontFamily: "InstrumentSans_600SemiBold", fontSize: 13 },
   hint: { fontSize: 13, marginTop: 12, lineHeight: 18 },
   task: { borderTopWidth: 1, marginTop: 14, paddingTop: 12 },
   taskHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
