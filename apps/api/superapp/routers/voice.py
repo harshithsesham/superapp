@@ -55,6 +55,10 @@ CONVERSE_SYSTEM = (
     "sending THAT draft: action=send_new_email with to_addr, subject, "
     "reply_body. New recipients always get this read-back-and-confirm, "
     "no exceptions.\n"
+    "CONNECTING ACCOUNTS: when they ask to connect/log into a site for the "
+    "scout (e.g. 'connect facebook'): action=connect_site, reply_body=site "
+    "name. Tell them a login window will be ready in under a minute at their "
+    "scout link, and it stays open twenty minutes.\n"
     "RESEARCH ERRANDS: when they ask you to find/search/scout something out "
     "in the world (homes, used goods, prices, options — anything needing the "
     "web), emit action=research_task with reply_body = a crisp self-contained "
@@ -96,7 +100,7 @@ CONVERSE_SCHEMA = {
                         "enum": ["none", "open_screen", "refresh_inbox", "start_interview",
                                  "draft_reply", "send_draft", "send_new_email",
                                  "set_nutrition", "log_water", "research_task",
-                                 "end_conversation"]},
+                                 "connect_site", "end_conversation"]},
         "screen": {"type": "string", "enum": ["hub", "inbox", "home", "finance", "stylist", ""]},
         "draft_id": {"type": "string"},
         "message_id": {"type": "string"},
@@ -241,10 +245,21 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
         append_event(db, user_id=user_id, type="nutrition_plan_set", agent="orb",
                      domain="nutrition", payload={k: plan[k] for k in ("kcal", "goal")})
         return {}
+    if action == "connect_site" and parsed.get("reply_body"):
+        from ..models import AgentTask
+        site = parsed["reply_body"].strip().lower()[:40]
+        task = AgentTask(user_id=user_id, kind="connect_login",
+                         instruction=f"connect {site}")
+        db.add(task)
+        db.flush()
+        append_event(db, user_id=user_id, type="task_queued", agent="orb",
+                     payload={"task_id": task.id, "kind": "connect_login", "site": site})
+        return {}
     if action == "research_task" and parsed.get("reply_body"):
         from ..models import AgentTask
-        task = AgentTask(user_id=user_id, kind="research",
-                         instruction=parsed["reply_body"][:1000].strip())
+        instruction = parsed["reply_body"][:1000].strip()
+        kind = "marketplace" if "marketplace" in instruction.lower() else "research"
+        task = AgentTask(user_id=user_id, kind=kind, instruction=instruction)
         db.add(task)
         db.flush()
         append_event(db, user_id=user_id, type="task_queued", agent="orb",

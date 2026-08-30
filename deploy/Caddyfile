@@ -1,3 +1,8 @@
 {$SUPERAPP_DOMAIN}, app.3.17.83.242.sslip.io {
-	reverse_proxy api:8000
+	handle /scout/* {
+		reverse_proxy scout:7900
+	}
+	handle {
+		reverse_proxy api:8000
+	}
 }

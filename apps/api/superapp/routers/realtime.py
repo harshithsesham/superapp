@@ -40,7 +40,7 @@ REALTIME_SYSTEM = (
     '<<action:{"type":"open_screen","screen":"inbox"}>> — types: open_screen '
     "(screen), refresh_inbox, draft_reply (message_id, reply_body, draft_id "
     "if editing), send_draft (draft_id), send_new_email (to_addr, subject, "
-    "reply_body), set_nutrition (profile_json), log_water (reply_body=ml), research_task (reply_body=instruction), start_interview. The tag is "
+    "reply_body), set_nutrition (profile_json), log_water (reply_body=ml), research_task (reply_body=instruction), connect_site (reply_body=site), start_interview. The tag is "
     "silent; everything before it "
     "is spoken. Same rules as ever: send only on an explicit yes, never "
     "invent addresses or facts."
@@ -175,7 +175,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db),
         kind = payload.get("type", "")
         # Server-side effects reuse the converse executor verbatim.
         if kind in ("draft_reply", "send_draft", "send_new_email", "set_nutrition",
-                    "log_water", "research_task"):
+                    "log_water", "research_task", "connect_site"):
             from ..db import SessionLocal
 
             adb = SessionLocal()

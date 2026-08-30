@@ -40,10 +40,12 @@ services:
     env_file: ../.env
     environment:
       SCOUT_API_URL: http://api:8000
+    volumes:
+      - scout_profile:/profile
     mem_limit: 900m
     depends_on:
       - api
-    # no ports: talks to api on the internal network only
+    # no ports: api + caddy reach it on the internal network only
 
   caddy:
     image: caddy:2
@@ -63,3 +65,4 @@ volumes:
   pgdata:
   media:
   caddy_data:
+  scout_profile:
