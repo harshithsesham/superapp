@@ -26,6 +26,8 @@ WORKER_TOKEN = os.environ["SUPERAPP_WORKER_TOKEN"]
 ANTHROPIC_KEY = os.environ.get("SUPERAPP_ANTHROPIC_API_KEY", "")
 SESSION_TOKEN = os.environ.get("SUPERAPP_SCOUT_SESSION_TOKEN", "")
 MODEL = os.environ.get("SCOUT_MODEL", "claude-opus-5")
+EBAY_APP_ID = os.environ.get("EBAY_APP_ID", "")
+EBAY_CERT_ID = os.environ.get("EBAY_CERT_ID", "")
 H = {"Authorization": f"Bearer {WORKER_TOKEN}"}
 PROFILE_DIR = "/profile"
 
@@ -222,6 +224,80 @@ def _llm(messages, schema, system):
     return "".join(b.text for b in resp.content if b.type == "text")
 
 
+# ---- eBay Browse API: the sanctioned finder (no scraping, no account risk) --
+
+_ebay_tok = {"token": "", "exp": 0.0}
+_PRICE_RE = re.compile(r"(?:under|below|less than|max(?:imum)?|<)\s*\$?\s*(\d[\d,]*)", re.I)
+_USED_RE = re.compile(r"\bused\b|second[- ]?hand|pre[- ]?owned|refurb", re.I)
+_STRIP_RE = re.compile(r"\b(find|search|look for|get me|show me|scout|on ebay|ebay)\b", re.I)
+
+
+def ebay_token() -> str:
+    if _ebay_tok["token"] and time.time() < _ebay_tok["exp"]:
+        return _ebay_tok["token"]
+    basic = base64.b64encode(f"{EBAY_APP_ID}:{EBAY_CERT_ID}".encode()).decode()
+    r = httpx.post("https://api.ebay.com/identity/v1/oauth2/token",
+                   headers={"Authorization": f"Basic {basic}",
+                            "Content-Type": "application/x-www-form-urlencoded"},
+                   data={"grant_type": "client_credentials",
+                         "scope": "https://api.ebay.com/oauth/api_scope"},
+                   timeout=20)
+    r.raise_for_status()
+    j = r.json()
+    _ebay_tok["token"] = j["access_token"]
+    _ebay_tok["exp"] = time.time() + int(j.get("expires_in", 7000)) - 120
+    return _ebay_tok["token"]
+
+
+def ebay_search(instruction: str) -> dict:
+    """Structured, sanctioned product search. Empty shortlist → caller falls back."""
+    try:
+        tok = ebay_token()
+    except Exception as exc:  # noqa: BLE001
+        return {"summary": "", "shortlist": [], "caveats": f"eBay auth: {exc}"[:200]}
+    filters = ["buyingOptions:{FIXED_PRICE}"]
+    price = _PRICE_RE.search(instruction)
+    if price:
+        filters += [f"price:[..{price.group(1).replace(',', '')}]", "priceCurrency:USD"]
+    if _USED_RE.search(instruction):
+        filters.append("conditions:{USED}")
+    q = _PRICE_RE.sub("", _STRIP_RE.sub("", instruction)).strip()[:100] or instruction[:100]
+    try:
+        r = httpx.get("https://api.ebay.com/buy/browse/v1/item_summary/search",
+                      headers={"Authorization": f"Bearer {tok}",
+                               "X-EBAY-C-MARKETPLACE-ID": "EBAY_US"},
+                      params={"q": q, "limit": "10", "sort": "price",
+                              "filter": ",".join(filters)}, timeout=25)
+        r.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        return {"summary": "", "shortlist": [], "caveats": f"eBay search: {exc}"[:200]}
+    shortlist = []
+    for it in (r.json().get("itemSummaries") or [])[:6]:
+        pr = it.get("price") or {}
+        loc = it.get("itemLocation") or {}
+        seller = it.get("seller") or {}
+        fb = seller.get("feedbackPercentage")
+        offers = "BEST_OFFER" in (it.get("buyingOptions") or [])
+        why = " · ".join(x for x in [
+            it.get("condition", ""),
+            f"{fb}% seller" if fb else "",
+            "accepts offers" if offers else "",
+        ] if x) or "eBay listing"
+        shortlist.append({
+            "title": (it.get("title") or "")[:120],
+            "price": f"${pr.get('value')}" if pr.get("value") else "",
+            "location": ", ".join(x for x in [loc.get("city"),
+                        loc.get("stateOrProvince"), loc.get("country")] if x)[:80],
+            "url": (it.get("itemWebUrl") or "")[:300],
+            "why": why[:120],
+        })
+    if not shortlist:
+        return {"summary": "", "shortlist": [], "caveats": "eBay had no matches for that."}
+    return {"summary": f"Found {len(shortlist)} eBay listings for “{q}”, cheapest first.",
+            "shortlist": shortlist,
+            "caveats": "Live eBay prices — listings change. Buying and offers stay your call."}
+
+
 async def run_research(context, instruction: str) -> dict:
     if not ANTHROPIC_KEY:
         return {"summary": f"(stub) Scouted for: {instruction[:80]}",
@@ -301,8 +377,12 @@ async def handle_task(context, task: dict) -> dict:
         return {"summary": f"Login window is open for {site} — you have 20 minutes.",
                 "shortlist": [], "caveats": "one-time; the session sticks after login",
                 "connect": True}
-    if kind == "marketplace" or "marketplace" in instruction.lower():
-        return await run_marketplace(context, instruction)
+    # eBay Browse is the sanctioned finder — try it first for any shopping
+    # errand; fall back to the open-web loop when it finds nothing.
+    if EBAY_APP_ID and EBAY_CERT_ID and kind in ("research", "shop", "marketplace"):
+        found = await asyncio.to_thread(ebay_search, instruction)
+        if found.get("shortlist"):
+            return found
     return await run_research(context, instruction)
 
 
