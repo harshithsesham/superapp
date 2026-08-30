@@ -71,6 +71,9 @@ class Settings(BaseSettings):
 
     # The scout worker authenticates with this to pull/complete tasks.
     worker_token: str = ""
+    # Secret path segment for the scout's streamed one-time login window.
+    scout_session_token: str = ""
+    scout_public_base: str = "https://app.nutrishiksha.com"
 
     # Realtime voice (ElevenLabs Agents, custom-LLM mode). The secret is what
     # their platform presents to our /v1/llm endpoint; the agent id names the

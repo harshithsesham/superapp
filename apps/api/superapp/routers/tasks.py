@@ -48,11 +48,18 @@ def create_task(body: NewTask, user_id: str = Depends(current_user_id),
     return {"id": task.id, "status": task.status}
 
 
+def _login_url() -> str | None:
+    settings = get_settings()
+    if not settings.scout_session_token:
+        return None
+    return f"{settings.scout_public_base}/scout/r/{settings.scout_session_token}"
+
+
 @router.get("")
 def list_tasks(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     rows = db.scalars(select(AgentTask).where(AgentTask.user_id == user_id)
                       .order_by(AgentTask.created_at.desc()).limit(10))
-    return {"tasks": [{
+    return {"login_url": _login_url(), "tasks": [{
         "id": t.id, "kind": t.kind, "instruction": t.instruction,
         "status": t.status, "result": t.result, "error": t.error,
         "created_at": t.created_at.isoformat(),
@@ -96,9 +103,15 @@ def complete_task(task_id: str, body: TaskResult, db: Session = Depends(get_db))
                           "found": len(body.result.get("shortlist", []))})
     n = len(body.result.get("shortlist", []))
     summary = str(body.result.get("summary", "")).strip()
-    send_push(db, user_id=task.user_id, title="Nano — scouted",
-              body=(summary or f"Found {n} options for: {task.instruction[:80]}")[:170],
-              agent="scout")
+    if body.result.get("connect"):
+        send_push(db, user_id=task.user_id, title="Nano — login window ready",
+                  body="Open Nano and tap Log in on the scout card. "
+                       "The window stays open 20 minutes.",
+                  agent="scout")
+    else:
+        send_push(db, user_id=task.user_id, title="Nano — scouted",
+                  body=(summary or f"Found {n} options for: {task.instruction[:80]}")[:170],
+                  agent="scout")
     db.commit()
     return {"ok": True}
 

@@ -30,6 +30,7 @@ import {
 import { InterviewScreen } from "./src/InterviewScreen";
 import { NanoOrb } from "./src/NanoOrb";
 import { CalScreen } from "./src/CalScreen";
+import { ScoutCard } from "./src/ScoutCard";
 import { SduiScreen } from "./src/sdui/renderer";
 import { SDUI_VERSION } from "./src/sdui/types";
 import type { Screen } from "./src/sdui/types";
@@ -563,14 +564,19 @@ function App() {
         {error ? (
           <Text style={styles.error}>{error}</Text>
         ) : screenName === "home" ? null : screen ? (
-          <SduiScreen
-            screen={screen}
-            onReaction={onReaction}
-            media={{ baseUrl: apiUrl, headers: AUTH }}
-            onDraftAction={onDraftAction}
-            onNavigate={onNavigate}
-            onFix={onFixMeal}
-          />
+          <>
+            <SduiScreen
+              screen={screen}
+              onReaction={onReaction}
+              media={{ baseUrl: apiUrl, headers: AUTH }}
+              onDraftAction={onDraftAction}
+              onNavigate={onNavigate}
+              onFix={onFixMeal}
+            />
+            {screenName === "hub" ? (
+              <ScoutCard apiUrl={apiUrl} auth={AUTH} dark={dark} />
+            ) : null}
+          </>
         ) : (
           <ActivityIndicator style={{ marginTop: 64 }} />
         )}
