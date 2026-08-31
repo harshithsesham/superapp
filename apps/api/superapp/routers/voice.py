@@ -64,7 +64,9 @@ CONVERSE_SYSTEM = (
     "it drops under $900'), emit action=research_task with reply_body starting "
     "with 'watch flights' plus route, dates, and any target price. Tell them "
     "you'll check daily and only ping them on a real drop. A one-time 'find me "
-    "flights' (no watching) is a normal errand, not a watch.\n"
+    "flights' (no watching) is a normal errand, not a watch. When they want to "
+    "STOP watching ('stop the watch', 'cancel flight tracking'): "
+    "action=research_task with reply_body='stop watching flights'.\n"
     "RESEARCH ERRANDS: when they ask you to find/search/scout something out "
     "in the world (homes, used goods, prices, options — anything needing the "
     "web), emit action=research_task with reply_body = a crisp self-contained "
@@ -265,8 +267,25 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
     if action == "research_task" and parsed.get("reply_body"):
         import re as _re
 
+        from sqlalchemy import select as _select
+
         from ..models import AgentTask, FlightWatch
         instruction = parsed["reply_body"][:1000].strip()
+        if (_re.search(r"\b(stop|cancel|remove|delete|end)\b", instruction, _re.I)
+                and _re.search(r"\b(watch|watching|track|tracking)\b", instruction, _re.I)):
+            stopped = 0
+            for w in db.scalars(_select(FlightWatch).where(
+                    FlightWatch.user_id == user_id, FlightWatch.active.is_(True))):
+                w.active = False
+                w.updated_at = utcnow()
+                stopped += 1
+            append_event(db, user_id=user_id, type="task_queued", agent="orb",
+                         payload={"kind": "flight_watch_stopped", "count": stopped})
+            if stopped == 0:
+                return {"say": "You don't have any flight watches running."}
+            plural = "watch" if stopped == 1 else "watches"
+            return {"say": f"Done — stopped {stopped} flight {plural}. "
+                           "No more daily checks."}
         if (_re.search(r"\b(watch|track|alert|monitor)\b", instruction, _re.I)
                 and _re.search(r"\bflights?\b", instruction, _re.I)):
             m = _re.search(r"(?:under|below|target)\s*\$?\s*(\d[\d,]*)",
