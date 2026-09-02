@@ -65,8 +65,9 @@ CONVERSE_SYSTEM = (
     "with 'watch flights' plus route, dates, and any target price. Tell them "
     "you'll check daily and only ping them on a real drop. A one-time 'find me "
     "flights' (no watching) is a normal errand, not a watch. When they want to "
-    "STOP watching ('stop the watch', 'cancel flight tracking'): "
-    "action=research_task with reply_body='stop watching flights'.\n"
+    "STOP anything the scout does ('stop the watch', 'cancel flight tracking', "
+    "'stop all scout jobs'): action=research_task with reply_body='stop all "
+    "scout errands and watches'.\n"
     "RESEARCH ERRANDS: when they ask you to find/search/scout something out "
     "in the world (homes, used goods, prices, options — anything needing the "
     "web), emit action=research_task with reply_body = a crisp self-contained "
@@ -271,21 +272,37 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
 
         from ..models import AgentTask, FlightWatch
         instruction = parsed["reply_body"][:1000].strip()
-        if (_re.search(r"\b(stop|cancel|remove|delete|end)\b", instruction, _re.I)
-                and _re.search(r"\b(watch|watching|track|tracking)\b", instruction, _re.I)):
+        if (_re.search(r"\b(stop|cancel|remove|delete|end|kill)\b", instruction, _re.I)
+                and _re.search(r"\b(watch(?:ing|es)?|track(?:ing)?|scout(?:ing)?"
+                               r"|errands?|tasks?|jobs?)\b", instruction, _re.I)):
             stopped = 0
             for w in db.scalars(_select(FlightWatch).where(
                     FlightWatch.user_id == user_id, FlightWatch.active.is_(True))):
                 w.active = False
                 w.updated_at = utcnow()
                 stopped += 1
+            cancelled = 0
+            for t in db.scalars(_select(AgentTask).where(
+                    AgentTask.user_id == user_id, AgentTask.status == "queued")):
+                t.status = "failed"
+                t.error = "Cancelled by you."
+                t.updated_at = utcnow()
+                cancelled += 1
             append_event(db, user_id=user_id, type="task_queued", agent="orb",
-                         payload={"kind": "flight_watch_stopped", "count": stopped})
-            if stopped == 0:
-                return {"say": "You don't have any flight watches running."}
-            plural = "watch" if stopped == 1 else "watches"
-            return {"say": f"Done — stopped {stopped} flight {plural}. "
-                           "No more daily checks."}
+                         payload={"kind": "scout_stopped", "watches": stopped,
+                                  "cancelled": cancelled})
+            if stopped == 0 and cancelled == 0:
+                return {"say": "The scout is already idle — no watches and "
+                               "nothing queued."}
+            parts = []
+            if stopped:
+                parts.append(f"stopped {stopped} flight "
+                             f"{'watch' if stopped == 1 else 'watches'}")
+            if cancelled:
+                parts.append(f"cancelled {cancelled} queued "
+                             f"{'errand' if cancelled == 1 else 'errands'}")
+            return {"say": f"Done — {' and '.join(parts)}. Anything already "
+                           "mid-run finishes within a minute and won't repeat."}
         if (_re.search(r"\b(watch|track|alert|monitor)\b", instruction, _re.I)
                 and _re.search(r"\bflights?\b", instruction, _re.I)):
             m = _re.search(r"(?:under|below|target)\s*\$?\s*(\d[\d,]*)",
