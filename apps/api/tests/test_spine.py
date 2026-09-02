@@ -373,12 +373,14 @@ def test_phase3_connect_triage_tiers_and_receipts():
     assert len(drafts) >= 2  # Eureka deadline, Marcus lease, Amma
     assert all(d["draft"] for d in drafts)  # written and waiting
     assert any("deadline" in d["why"] or "waiting" in d["why"] for d in drafts)
-    assert any(t.startswith("Read only") for t in titles)
-    assert any(t.startswith("Cleared without asking") for t in titles)
+    # Gmail-simple: one Primary list holds everything, expandable in place.
+    assert any(t.startswith("Primary") for t in titles)
+    primary = next(s2 for s2 in screen["sections"] if (s2["title"] or "").startswith("Primary"))
+    rows = next(b for b in primary["blocks"] if b["type"] == "list")["items"]
+    assert len(rows) >= 8 and all(r["detail"] for r in rows)
 
-    # Noise never made it into the visible tiers.
-    all_text = str(screen)
-    assert "UNIQLO" not in all_text and "LinkedIn" not in all_text
+    # Noise is visible in Primary (that's the point) but never becomes an ask.
+    assert "UNIQLO" not in str(needs) and "LinkedIn" not in str(needs)
 
     # The receipt (Myntra order) was recognized — the Phase 4d hook.
     db = SessionLocal()
@@ -625,7 +627,7 @@ def test_sent_by_nano_is_visible_and_in_voice_context():
     # The send-flow tests sent a draft; it must appear on the inbox screen...
     screen = client.get("/v1/screen/inbox", headers=AUTH).json()
     sent_sec = next(sec for sec in screen["sections"]
-                    if (sec["title"] or "").startswith("Sent by Nano"))
+                    if (sec["title"] or "").startswith("Sent"))
     rows = next(b for b in sent_sec["blocks"] if b["type"] == "list")["items"]
     assert rows and all(r["detail"] for r in rows)  # readable, tap to expand
     assert rows[0]["title"].startswith("To ")
