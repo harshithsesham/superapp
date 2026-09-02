@@ -358,19 +358,29 @@ def inbox_render(context: ContextSlice) -> Screen:
         ask_blocks.append(TextBlock(text="Nothing needs your words right now.", variant="caption"))
     sections.append(Section(title=f"Needs your words · {len(active)}", blocks=ask_blocks))
 
-    reads = data.get("worth_knowing", [])
-    if reads:
-        sections.append(Section(title=f"Read only · nothing to do · {len(reads)}", blocks=[
-            ListBlock(items=[
-                ListItem(id=r["id"], title=r["from_name"], subtitle=r["gist"] or r["subject"],
-                         detail=f"{r['subject']}\n\n{r['body']}".strip() or None)
-                for r in reads
-            ])
-        ]))
+    # Gmail-simple: one Primary list with everything, expandable in place.
+    primary = data.get("primary", [])
+    if primary:
+        items = []
+        for p in primary:
+            d = p.get("draft") or {}
+            replied = d.get("status") == "sent"
+            detail = f"{p['subject']}\n\n{p['body']}".strip()
+            if replied and d.get("body"):
+                detail += f"\n\n———\nYour reply (sent):\n{d['body']}"
+            t = p.get("received_at", "")
+            items.append(ListItem(
+                id=f"pri-{p['id']}", title=p["from_name"],
+                subtitle=("✓ " if replied else "") + (p["subject"] or p["gist"] or ""),
+                trailing=t[11:16] if len(t) > 16 else None,
+                detail=detail or None,
+            ))
+        sections.append(Section(title=f"Primary · {len(primary)}",
+                                blocks=[ListBlock(items=items)]))
 
     sent = data.get("sent", [])
     if sent:
-        sections.append(Section(title=f"Sent by Nano · {len(sent)}", blocks=[
+        sections.append(Section(title=f"Sent · {len(sent)}", blocks=[
             ListBlock(items=[
                 ListItem(id=f"sent-{i}", title=f"To {x['to_name'] or x['to_addr']}",
                          subtitle=x["subject"] or x["body"][:70],
@@ -378,14 +388,6 @@ def inbox_render(context: ContextSlice) -> Screen:
                          detail=f"{x['subject']}\n\n{x['body']}".strip())
                 for i, x in enumerate(sent)
             ])
-        ]))
-
-    cleared = data.get("cleared_count", 0)
-    if cleared:
-        by_reason = data.get("cleared_by_reason", {})
-        summary = ", ".join(f"{n} {reason}s" for reason, n in sorted(by_reason.items(), key=lambda kv: -kv[1]))
-        sections.append(Section(title=f"Cleared without asking · {cleared}", blocks=[
-            TextBlock(text=f"Filed {summary}. None of it was a decision.", variant="caption"),
         ]))
 
     brief = _fact(context, "morning_brief")

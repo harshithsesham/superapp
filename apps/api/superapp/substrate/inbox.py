@@ -118,9 +118,18 @@ def inbox_context(db: Session, user_id: str) -> dict:
         })
     sent.sort(key=lambda x: x["sent_at"], reverse=True)
 
+    # Gmail-simple Primary: every synced message, newest first, bodies trimmed
+    # so downstream prompts stay lean.
+    primary = []
+    for m in msgs[:25]:
+        r = row(m)
+        r["body"] = r["body"][:1500]
+        primary.append(r)
+
     return {
         "connected": bool(accounts(db, user_id)),
         "needs_reply": open_asks,
+        "primary": primary,
         "worth_knowing": [row(m) for m in msgs if m.tier == "worth_knowing" and not m.settled][:8],
         "cleared_count": len(cleared),
         "cleared_by_reason": cleared_by_reason,
