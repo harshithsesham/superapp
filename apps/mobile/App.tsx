@@ -352,8 +352,11 @@ function App() {
     }
   }, []);
 
+  const draftInFlight = useRef<Set<string>>(new Set());
   const onDraftAction = useCallback(
     async (action: "send" | "defer" | "save" | "now", draftId: string, body?: string) => {
+      if (draftInFlight.current.has(draftId)) return; // first tap is still working
+      draftInFlight.current.add(draftId);
       try {
         setError(null);
         if (action === "save") {
@@ -376,12 +379,19 @@ function App() {
           setError("Sending is off until you enable it (gmail_scope_tier=send).");
           return;
         }
+        if (res.status === 409) {
+          // Already sent — an earlier tap won. Not an error; show the fresh truth.
+          await load();
+          return;
+        }
         await applyScreen(res);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        draftInFlight.current.delete(draftId);
       }
     },
-    [applyScreen]
+    [applyScreen, load]
   );
 
   const onReaction = useCallback(
