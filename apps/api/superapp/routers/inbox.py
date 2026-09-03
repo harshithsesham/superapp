@@ -299,6 +299,7 @@ def backfill_inbox(background: BackgroundTasks,
                    db: Session = Depends(get_db)):
     """Ingest ~40 recent Primary emails (first fill). Triage runs in the
     background; the screen catches up on the next refresh."""
+    from ..routers.screen import _background_think
     background.add_task(_background_think, "inbox", user_id, {"kind": "backfill"})
     return {"ok": True}
 
