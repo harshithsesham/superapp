@@ -269,6 +269,13 @@ def _sync(db: Session, context: ContextSlice, trigger: dict) -> ThinkResult:
             msg.why_now = verdict["why_now"][:120]
             msg.clear_reason = verdict["clear_reason"][:120]
 
+            if msg.tier in ("needs_reply", "worth_knowing"):
+                from ..people import update_person
+                update_person(db, provider, context.user_id,
+                              email=msg.from_addr, name=msg.from_name,
+                              direction="from_them", subject=msg.subject,
+                              body=msg.body_text[:4000])
+
             if msg.tier == "cleared":
                 if _verify_clear(db, context, provider, msg):
                     msg.verified_clear = True

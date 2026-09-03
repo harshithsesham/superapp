@@ -172,6 +172,11 @@ def send_draft(draft_id: str, user_id: str = Depends(current_user_id), db: Sessi
     msg.settled = True
     append_event(db, user_id=user_id, type="draft_sent", agent="inbox", domain="inbox",
                  payload={"draft_id": draft.id, "gmail_sent_id": sent_id, "edited": was_edited})
+    from ..llm.provider import LLMProvider
+    from ..people import update_person
+    update_person(db, LLMProvider(), user_id, email=msg.from_addr,
+                  name=msg.from_name, direction="user_wrote",
+                  subject=msg.subject, body=draft.body[:4000])
     # The tap is a typed verdict: sent-as-written is the kernel's cleanest signal.
     record_decision(db, user_id=user_id, agent="inbox", action_key="inbox.send_reply",
                     decided_by="user", verdict="edited" if was_edited else "accepted",
@@ -280,6 +285,12 @@ def inbox_state(user_id: str = Depends(current_user_id), db: Session = Depends(g
         "handled_categories": categories,
         "sent": data.get("sent", []),
     }
+
+
+@router.get("/people")
+def list_people(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    from ..people import people_for_voice
+    return {"people": people_for_voice(db, user_id, limit=25)}
 
 
 @router.post("/inbox/backfill")

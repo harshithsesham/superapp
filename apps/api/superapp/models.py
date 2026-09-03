@@ -38,6 +38,28 @@ class FlightWatch(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Person(Base):
+    """The people graph: one living profile per human correspondent.
+    Updated incrementally on every email in or out (extract -> update),
+    injected into any composer writing to them. Records, not beliefs —
+    the belief-shaped distillations stay in user_facts."""
+
+    __tablename__ = "people"
+    __table_args__ = (UniqueConstraint("user_id", "email", name="uq_people_user_email"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), default="")
+    relationship: Mapped[str] = mapped_column(String(120), default="")
+    tone: Mapped[str] = mapped_column(String(250), default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    facts: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    email_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class AgentTask(Base):
     """The scout's queue: web-research errands the person spoke into being.
     Results are structured shortlists; every state change is an event."""

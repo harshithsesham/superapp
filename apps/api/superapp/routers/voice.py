@@ -85,6 +85,10 @@ CONVERSE_SYSTEM = (
     "nutrition in context is their live day — plan targets, what they ate, "
     "kcal_left, water — answer calorie/macro/water questions from it with "
     "real numbers, never estimates of your own.\n"
+    "people in context is who they know — each with relationship, tone, a "
+    "summary, and dated facts, kept fresh from their mail. When writing to "
+    "or talking about one of them, match that relationship and tone and use "
+    "those facts. 'Send an email to my sister' resolves through people.\n"
     "recently_sent in context is the record of what YOU sent for them — "
     "when they ask what was sent, answer from it concretely (who, what, when).\n"
     "They log water by voice ('log a glass of water', 'I drank a bottle'): "
@@ -139,6 +143,12 @@ class Turn(BaseModel):
 
 class ConverseBody(BaseModel):
     messages: list[Turn] = Field(min_length=1, max_length=40)
+
+
+def _people(db, user_id: str) -> list[dict]:
+    from ..people import people_for_voice
+
+    return people_for_voice(db, user_id)
 
 
 def _tasks_for_voice(db, user_id: str) -> list[dict]:
@@ -379,6 +389,10 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
         remember(db, user_id=user_id, domain="inbox", kind="sent", ref_id=sent_id,
                  content=f"Nano sent an email to {addr} — {subject}: "
                          f"{parsed['reply_body'][:600]}")
+        from ..people import update_person
+        update_person(db, LLMProvider(), user_id, email=addr,
+                      direction="user_wrote", subject=subject,
+                      body=parsed["reply_body"][:4000])
         # New recipient: hard-capped at ask-first in the kernel, forever.
         record_decision(db, user_id=user_id, agent="inbox",
                         action_key="inbox.send_new_recipient", decided_by="user",
@@ -448,6 +462,7 @@ def converse(body: ConverseBody, user_id: str = Depends(current_user_id),
             "inbox": voice_inbox,
             "nutrition": _nutrition_for_voice(context),
             "scout_tasks": _tasks_for_voice(db, user_id),
+            "people": _people(db, user_id),
             "remembered": recall(db, user_id=user_id,
                                  query=body.messages[-1].text, k=4),
             "person": [f for f in context.facts if f["domain"] in ("identity", "inbox", "goals")][:12],
