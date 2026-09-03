@@ -32,11 +32,13 @@ SCOPES_BY_TIER = {
 
 MAX_BODY_CHARS = 8000
 
-# Only new mail in the Primary tab gets triaged: skip Gmail's own category tabs,
-# spam/trash, and messages the user sent. Accounts without tabbed inbox work too
-# (their primary mail simply carries no CATEGORY_* label).
+# Skip only what is unambiguously not the person's mail: spam/trash, their own
+# sent mail, and the two pure-noise tabs. CATEGORY_UPDATES stays IN — Gmail
+# hangs that label on mail people actually see in Primary (receipts, banks,
+# humans via services), and deciding what's noise is triage's job, not a
+# label heuristic's.
 SKIP_LABELS = {"SPAM", "TRASH", "SENT", "DRAFT", "CATEGORY_SOCIAL",
-               "CATEGORY_PROMOTIONS", "CATEGORY_UPDATES", "CATEGORY_FORUMS"}
+               "CATEGORY_PROMOTIONS"}
 
 
 class GmailClient:
