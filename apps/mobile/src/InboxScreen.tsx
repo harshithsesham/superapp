@@ -1,19 +1,12 @@
 // The inbox, design-true (Nano V1): Needs you (the email, your draft, the
 // consequence, one tap to send or hold), Worth knowing (expandable, with why
-// it surfaced), Handled without you (expandable category breakdown), Sent —
-// and the sphere: a full-screen ambient voice surface that listens, traces
-// its thinking, answers out loud, and shows the things it's talking about.
+// it surfaced), Handled without you (expandable category breakdown), Sent.
+// Voice lives in the edge-docked orb — the same realtime conversation as
+// everywhere else, interruptible mid-sentence.
 import { LinearGradient } from "expo-linear-gradient";
-import { useAudioPlayer } from "expo-audio";
-import {
-  ExpoSpeechRecognitionModule,
-  useSpeechRecognitionEvent,
-} from "expo-speech-recognition";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Animated,
-  Easing,
   Linking,
   Pressable,
   RefreshControl,
@@ -55,8 +48,6 @@ type InboxState = {
   handled_count: number; handled_categories: HandledCat[]; sent: SentItem[];
 };
 
-const TRACES = ["parsing intent", "reading your inbox", "ranking by consequence", "composing the surface"];
-const INTENTS = ["What actually needs me?", "Did I miss anything this week?", "What did you send for me?"];
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -69,9 +60,11 @@ function hhmm(iso: string): string {
 export function InboxScreen({
   apiUrl,
   auth,
+  onBack,
 }: {
   apiUrl: string;
   auth: Record<string, string>;
+  onBack: () => void;
 }) {
   const [state, setState] = useState<InboxState | null>(null);
   const [openNote, setOpenNote] = useState<string | null>(null);
@@ -80,7 +73,6 @@ export function InboxScreen({
   const [sentOpen, setSentOpen] = useState<string | null>(null);
   const [busyDraft, setBusyDraft] = useState<string | null>(null);
   const [sentLocal, setSentLocal] = useState<Set<string>>(new Set());
-  const [voiceOpen, setVoiceOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const alive = useRef(true);
 
@@ -155,6 +147,9 @@ export function InboxScreen({
           />
         }
       >
+        <Pressable onPress={onBack} hitSlop={12} style={{ alignSelf: "flex-start" }}>
+          <Text style={s.backLink}>‹  MY HUB</Text>
+        </Pressable>
         <View style={s.headRow}>
           <View>
             <Text style={s.title}>Inbox Zero</Text>
@@ -331,184 +326,6 @@ export function InboxScreen({
         ) : null}
       </ScrollView>
 
-      <Pressable style={s.sphere} onPress={() => setVoiceOpen(true)}>
-        <LinearGradient colors={["#9F8CFF", "#5B45D6"]} style={s.sphereBall} />
-      </Pressable>
-
-      {voiceOpen ? (
-        <VoiceSurface apiUrl={apiUrl} auth={auth} asks={openAsks}
-                      onClose={() => { setVoiceOpen(false); refresh(); }} />
-      ) : null}
-    </View>
-  );
-}
-
-// ---- the ambient voice surface ---------------------------------------------
-
-type Phase = "listening" | "thinking" | "answer";
-
-function VoiceSurface({
-  apiUrl, auth, asks, onClose,
-}: {
-  apiUrl: string; auth: Record<string, string>; asks: Ask[]; onClose: () => void;
-}) {
-  const [phase, setPhase] = useState<Phase>("listening");
-  const [heard, setHeard] = useState("");
-  const [traceIdx, setTraceIdx] = useState(0);
-  const [answer, setAnswer] = useState("");
-  const [sayUrl, setSayUrl] = useState<string | null>(null);
-  const history = useRef<{ role: "user" | "nano"; text: string }[]>([]);
-  const finalRef = useRef("");
-  const alive = useRef(true);
-  const pulse = useRef(new Animated.Value(1)).current;
-  const player = useAudioPlayer(sayUrl ? { uri: sayUrl, headers: auth } : null);
-
-  useEffect(() => {
-    if (sayUrl) { try { player.play(); } catch { /* muted device */ } }
-  }, [sayUrl, player]);
-
-  useEffect(() => {
-    const loop = Animated.loop(Animated.sequence([
-      Animated.timing(pulse, { toValue: 1.18, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-      Animated.timing(pulse, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-    ]));
-    loop.start();
-    return () => loop.stop();
-  }, [pulse]);
-
-  useEffect(() => {
-    alive.current = true;
-    (async () => {
-      try {
-        const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-        if (perm.granted) {
-          ExpoSpeechRecognitionModule.start({ lang: "en-US", interimResults: true, continuous: false });
-        }
-      } catch { /* chips still work */ }
-    })();
-    return () => {
-      alive.current = false;
-      try { ExpoSpeechRecognitionModule.stop(); } catch { /* already stopped */ }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (phase !== "thinking") return;
-    setTraceIdx(0);
-    const t = setInterval(() => setTraceIdx((i) => Math.min(i + 1, TRACES.length - 1)), 480);
-    return () => clearInterval(t);
-  }, [phase]);
-
-  const ask = useCallback(async (text: string) => {
-    if (!text.trim()) return;
-    try { ExpoSpeechRecognitionModule.stop(); } catch { /* fine */ }
-    setHeard(text);
-    setPhase("thinking");
-    history.current.push({ role: "user", text });
-    try {
-      const res = await fetch(`${apiUrl}/v1/voice/converse`, {
-        method: "POST",
-        headers: { ...auth, "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history.current.slice(-16) }),
-      });
-      const data = await res.json();
-      if (!alive.current) return;
-      const say = data.say ?? "…";
-      history.current.push({ role: "nano", text: say });
-      setAnswer(say);
-      setSayUrl(`${apiUrl}/v1/voice/speak?text=${encodeURIComponent(say)}&v=${Date.now()}`);
-      setPhase("answer");
-    } catch {
-      if (alive.current) {
-        setAnswer("I couldn't reach the server just now.");
-        setPhase("answer");
-      }
-    }
-  }, [apiUrl, auth]);
-
-  useSpeechRecognitionEvent("result", (e) => {
-    const t = e.results?.[0]?.transcript ?? "";
-    if (t) { finalRef.current = t; if (phase === "listening") setHeard(t); }
-  });
-  useSpeechRecognitionEvent("end", () => {
-    if (phase === "listening" && finalRef.current.trim()) ask(finalRef.current);
-  });
-
-  const listenAgain = useCallback(() => {
-    finalRef.current = "";
-    setHeard("");
-    setPhase("listening");
-    try {
-      ExpoSpeechRecognitionModule.start({ lang: "en-US", interimResults: true, continuous: false });
-    } catch { /* chips still work */ }
-  }, []);
-
-  return (
-    <View style={s.surface}>
-      <Pressable style={s.surfaceClose} onPress={onClose} hitSlop={12}>
-        <Text style={{ color: C.muted, fontSize: 22 }}>✕</Text>
-      </Pressable>
-
-      <Animated.View style={[s.surfaceOrb, { transform: [{ scale: phase === "listening" ? pulse : 1 }] }]}>
-        <LinearGradient colors={["#9F8CFF", "#5B45D6"]} style={{ flex: 1, borderRadius: 40 }} />
-      </Animated.View>
-
-      {phase === "listening" ? (
-        <>
-          <Text style={s.surfaceState}>LISTENING</Text>
-          <Text style={s.surfaceHeard}>{heard || "Say it — or tap a question below."}</Text>
-        </>
-      ) : null}
-
-      {phase === "thinking" ? (
-        <>
-          <Text style={s.surfaceState}>“{heard}”</Text>
-          <View style={{ marginTop: 22, gap: 8 }}>
-            {TRACES.slice(0, traceIdx + 1).map((t, i) => (
-              <Text key={t} style={[s.trace, i === traceIdx && { color: C.lav }]}>
-                {i < traceIdx ? "✓ " : "· "}{t}
-              </Text>
-            ))}
-          </View>
-        </>
-      ) : null}
-
-      {phase === "answer" ? (
-        <>
-          <Text style={s.surfaceAnswer}>{answer}</Text>
-          {asks.length ? (
-            <View style={{ marginTop: 20, gap: 8, alignSelf: "stretch" }}>
-              {asks.slice(0, 2).map((a, i) => (
-                <View key={a.id} style={s.miniCard}>
-                  <LinearGradient colors={TILES[i % TILES.length]}
-                                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.miniTile}>
-                    <Text style={s.tileText}>{initials(a.from_name)}</Text>
-                  </LinearGradient>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.noteFrom} numberOfLines={1}>{a.from_name}</Text>
-                    <Text style={s.noteGist} numberOfLines={1}>{a.subject}</Text>
-                  </View>
-                  {a.why_now ? (
-                    <View style={s.chip}><Text style={s.chipText}>{a.why_now.toUpperCase().slice(0, 14)}</Text></View>
-                  ) : null}
-                </View>
-              ))}
-            </View>
-          ) : null}
-          <Pressable style={[s.primaryBtn, { marginTop: 22, alignSelf: "center", paddingHorizontal: 26 }]}
-                     onPress={listenAgain}>
-            <Text style={s.primaryText}>Ask more</Text>
-          </Pressable>
-        </>
-      ) : null}
-
-      <View style={s.intentRow}>
-        {INTENTS.map((q) => (
-          <Pressable key={q} style={s.intentChip} onPress={() => ask(q)}>
-            <Text style={s.intentText}>{q}</Text>
-          </Pressable>
-        ))}
-      </View>
     </View>
   );
 }
@@ -516,6 +333,7 @@ function VoiceSurface({
 const s = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: C.bg },
   scroll: { padding: 20, paddingBottom: 140 },
+  backLink: { fontFamily: SANS_SEMI, fontSize: 13, color: C.muted, marginBottom: 14 },
   headRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   title: { fontFamily: SERIF, fontSize: 38, color: C.text },
   sub: { fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: C.muted, marginTop: 4 },
@@ -563,18 +381,4 @@ const s = StyleSheet.create({
   handledTitle: { fontFamily: SERIF, fontSize: 20, color: C.text },
   catN: { fontFamily: MONO, fontSize: 11, color: C.mint, marginTop: 3 },
   footer: { fontFamily: SANS, fontSize: 12.5, lineHeight: 18, color: C.muted, paddingBottom: 10 },
-  sphere: { position: "absolute", bottom: 28, alignSelf: "center" },
-  sphereBall: { width: 58, height: 58, borderRadius: 29, shadowColor: "#9F8CFF", shadowOpacity: 0.8, shadowRadius: 16, shadowOffset: { width: 0, height: 0 } },
-  surface: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(4,4,10,0.97)", alignItems: "center", paddingTop: 90, paddingHorizontal: 26 },
-  surfaceClose: { position: "absolute", top: 24, right: 24 },
-  surfaceOrb: { width: 80, height: 80, borderRadius: 40, shadowColor: "#9F8CFF", shadowOpacity: 0.9, shadowRadius: 24, shadowOffset: { width: 0, height: 0 } },
-  surfaceState: { fontFamily: MONO, fontSize: 11, letterSpacing: 3, color: C.muted, marginTop: 26, textAlign: "center" },
-  surfaceHeard: { fontFamily: SERIF, fontSize: 26, lineHeight: 33, color: C.text, marginTop: 14, textAlign: "center" },
-  trace: { fontFamily: MONO, fontSize: 12, letterSpacing: 1, color: C.muted },
-  surfaceAnswer: { fontFamily: SERIF, fontSize: 27, lineHeight: 35, color: C.text, marginTop: 24, textAlign: "center" },
-  miniCard: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 16, borderWidth: 1, borderColor: C.border, backgroundColor: C.panel, padding: 12 },
-  miniTile: { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center" },
-  intentRow: { position: "absolute", bottom: 34, left: 20, right: 20, flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "center" },
-  intentChip: { borderWidth: 1, borderColor: C.border, backgroundColor: C.panel2, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9 },
-  intentText: { fontFamily: SANS, fontSize: 12.5, color: C.body },
 });

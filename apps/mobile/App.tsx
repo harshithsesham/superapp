@@ -599,7 +599,7 @@ function App() {
 
       {screenName === "inbox" && !error ? (
         <View style={{ position: "absolute", top: 60, left: 0, right: 0, bottom: 0 }}>
-          <InboxScreen apiUrl={apiUrl} auth={AUTH} />
+          <InboxScreen apiUrl={apiUrl} auth={AUTH} onBack={() => setScreenName("hub")} />
         </View>
       ) : null}
 
@@ -662,7 +662,6 @@ function App() {
         </View>
       )}
 
-      {screenName === "inbox" ? null : (
       <NanoOrb
         apiUrl={apiUrl}
         auth={AUTH}
@@ -675,7 +674,6 @@ function App() {
         }}
         onActed={() => load()}
       />
-      )}
     </SafeAreaView>
     </SafeAreaProvider>
   );
