@@ -117,7 +117,14 @@ class GmailClient:
             params = {"startHistoryId": history_id, "historyTypes": "messageAdded"}
             if page:
                 params["pageToken"] = page
-            data = self._get("/history", **params)
+            try:
+                data = self._get("/history", **params)
+            except httpx.HTTPStatusError as exc:
+                # Gmail expires old history cursors (404). After a long outage
+                # the only honest move is to reset the watermark to now.
+                if exc.response.status_code == 404 and not page:
+                    return [], str(self.profile()["historyId"])
+                raise
             for h in data.get("history", []):
                 ids += [m["message"]["id"] for m in h.get("messagesAdded", [])]
             page = data.get("nextPageToken")
@@ -129,10 +136,11 @@ class GmailClient:
             try:
                 msgs.append(self._parse(self._get(f"/messages/{mid}", format="full")))
             except httpx.HTTPStatusError as exc:
-                # Mail can vanish between the history listing and the fetch
-                # (spam purges, immediate deletes). Skip it; never let one
-                # ghost message kill the whole sync.
-                if exc.response.status_code == 404:
+                # Mail can vanish or be policy-blocked between the history
+                # listing and the fetch (spam purges, immediate deletes,
+                # 403-forbidden ghosts). Skip it; never let one message
+                # kill the whole sync.
+                if exc.response.status_code in (403, 404, 410):
                     continue
                 raise
         return [m for m in msgs if m], new_hid

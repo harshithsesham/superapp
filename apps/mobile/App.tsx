@@ -32,6 +32,7 @@ import { NanoOrb } from "./src/NanoOrb";
 import { CalScreen } from "./src/CalScreen";
 import { FlightsScreen } from "./src/FlightsScreen";
 import { HubScreen } from "./src/HubScreen";
+import { InboxScreen } from "./src/InboxScreen";
 import { SduiScreen } from "./src/sdui/renderer";
 import { SDUI_VERSION } from "./src/sdui/types";
 import type { Screen } from "./src/sdui/types";
@@ -574,7 +575,7 @@ function App() {
       >
         {error ? (
           <Text style={styles.error}>{error}</Text>
-        ) : screenName === "home" || screenName === "flights" ? null : screen ? (
+        ) : screenName === "home" || screenName === "flights" || screenName === "inbox" ? null : screen ? (
           screenName === "hub" ? (
             <HubScreen
               screen={screen}
@@ -595,6 +596,12 @@ function App() {
           <ActivityIndicator style={{ marginTop: 64 }} />
         )}
       </ScrollView>
+
+      {screenName === "inbox" && !error ? (
+        <View style={{ position: "absolute", top: 60, left: 0, right: 0, bottom: 0 }}>
+          <InboxScreen apiUrl={apiUrl} auth={AUTH} />
+        </View>
+      ) : null}
 
       {screenName === "flights" && !error ? (
         <View style={{ position: "absolute", top: 60, left: 0, right: 0, bottom: 0 }}>
@@ -655,6 +662,7 @@ function App() {
         </View>
       )}
 
+      {screenName === "inbox" ? null : (
       <NanoOrb
         apiUrl={apiUrl}
         auth={AUTH}
@@ -667,6 +675,7 @@ function App() {
         }}
         onActed={() => load()}
       />
+      )}
     </SafeAreaView>
     </SafeAreaProvider>
   );

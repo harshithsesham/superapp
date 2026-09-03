@@ -3,6 +3,7 @@
 // autonomy panel, and the app cards — inbox, nutrition, finance, stylist,
 // flights — each one tap away. Consumes the existing /v1/screen/hub SDUI
 // payload; only the presentation is native.
+import { LinearGradient } from "expo-linear-gradient";
 import React, { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
@@ -123,23 +124,25 @@ export function HubScreen({
       {line2 ? <Text style={s.greeting}>{line2}</Text> : null}
       {b.hint ? <Text style={s.hint}>{b.hint}</Text> : null}
 
-      {b.brief ? (
-        <Pressable
-          style={s.brief}
-          onPress={() => b.brief?.screen && onNavigate(b.brief.screen)}
-        >
+      {b.inbox ? (
+        <Pressable style={s.brief} onPress={() => onNavigate("inbox")}>
           <View style={s.briefHead}>
-            <View style={s.orbDot} />
-            <Text style={s.briefLabel}>
-              YOUR BRIEF{briefTime ? `  ·  ${briefTime}` : ""}
-            </Text>
-            {b.brief.screen ? <Text style={s.chevron}>›</Text> : null}
+            <LinearGradient colors={["#818CF8", "#4338CA"]}
+                            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.inboxTile}>
+              <Text style={s.inboxTileText}>I</Text>
+            </LinearGradient>
+            <View style={{ flex: 1 }}>
+              <Text style={s.inboxName}>Inbox Zero</Text>
+              <Text style={s.inboxSub}>{b.inbox.sub}{briefTime ? ` · synced ${briefTime}` : ""}</Text>
+            </View>
+            <Text style={s.live}>LIVE</Text>
+            <Text style={s.chevron}>›</Text>
           </View>
-          <Text style={s.briefHeadline}>{b.brief.headline}</Text>
-          <Text style={s.briefBody}>{b.brief.body}</Text>
-          {b.brief.stats?.length ? (
+          <Text style={s.briefHeadline}>{b.inbox.headline}</Text>
+          <Text style={s.briefBody}>{b.inbox.body}</Text>
+          {b.inbox.stats?.length ? (
             <View style={s.statRow}>
-              {b.brief.stats.map((st, i) => (
+              {b.inbox.stats.map((st, i) => (
                 <View key={i} style={s.statTile}>
                   <Text style={[s.statN, st.accent && { color: C.mint }]}>{st.n}</Text>
                   <Text style={s.statLabel}>{st.label}</Text>
@@ -226,11 +229,6 @@ export function HubScreen({
         <Text style={s.sectionTitle}>Your Hub</Text>
       </View>
       <View style={s.cards}>
-        {b.inbox ? (
-          <AppCard letter="M" tone="indigo" name="Inbox"
-                   sub={b.inbox.headline}
-                   onPress={() => onNavigate("inbox")} />
-        ) : null}
         {b.grid?.items.map((g) => (
           <AppCard key={g.screen} letter={g.name[0]} tone={g.tone ?? "indigo"}
                    name={g.name} sub={g.sub} onPress={() => onNavigate(g.screen)} />
@@ -273,6 +271,11 @@ const s = StyleSheet.create({
     shadowColor: "#9F8CFF", shadowOpacity: 0.9, shadowRadius: 8, shadowOffset: { width: 0, height: 0 },
   },
   briefLabel: { fontFamily: MONO, fontSize: 11, letterSpacing: 3, color: C.muted, flex: 1 },
+  inboxTile: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  inboxTileText: { fontFamily: SANS_SEMI, fontSize: 18, color: "#FFFFFF" },
+  inboxName: { fontFamily: SANS_SEMI, fontSize: 17, color: C.text },
+  inboxSub: { fontFamily: SANS, fontSize: 12.5, color: C.muted, marginTop: 2 },
+  live: { fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: C.mint, marginRight: 2 },
   chevron: { color: C.muted, fontSize: 22, lineHeight: 22 },
   briefHeadline: { fontFamily: SERIF, fontSize: 27, lineHeight: 33, color: C.text, marginTop: 14 },
   briefBody: { fontFamily: SANS, fontSize: 15, lineHeight: 22, color: "#B9B4CC", marginTop: 10 },

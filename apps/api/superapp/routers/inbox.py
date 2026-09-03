@@ -217,3 +217,66 @@ def defer_draft(draft_id: str, body: DeferBody | None = None,
                     decided_by="user", verdict="deferred", payload={"draft_id": draft.id})
     db.commit()
     return render_screen(db, agent="inbox", user_id=user_id).model_dump()
+
+
+# ---- native inbox screen state (Nano V1 design) -----------------------------
+
+_HANDLED_LABELS = {
+    "promotion": ("Promotions and sales", "archived"),
+    "newsletter": ("Newsletters", "filed under Reading"),
+    "social": ("Social notifications", "filed"),
+    "automated": ("Automated notices", "filed"),
+    "receipt": ("Receipts", "filed"),
+    "other": ("Other noise", "filed"),
+}
+
+
+@router.get("/inbox/state")
+def inbox_state(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """Structured state for the native inbox screen: the three tiers of the
+    V1 design — Needs you, Worth knowing (expandable), handled-without-you
+    with a category breakdown — plus sent mail and the sync stamp."""
+    from ..substrate.inbox import inbox_context
+
+    data = inbox_context(db, user_id)
+    by_reason = dict(data.get("cleared_by_reason", {}))
+    receipts = len(data.get("receipts", []))
+    if receipts:
+        by_reason["receipt"] = receipts
+    categories = []
+    for reason, n in sorted(by_reason.items(), key=lambda kv: -kv[1]):
+        name, verb = _HANDLED_LABELS.get(reason or "other", _HANDLED_LABELS["other"])
+        categories.append({"name": name, "n": f"{n} {verb}", "count": n})
+
+    from sqlalchemy import select as _select
+
+    from ..models import Event
+    last_sync = db.scalar(_select(Event).where(
+        Event.user_id == user_id, Event.type == "inbox_synced")
+        .order_by(Event.created_at.desc()).limit(1))
+
+    return {
+        "connected": data.get("connected", False),
+        "synced_at": last_sync.created_at.isoformat() if last_sync else None,
+        "needs_reply": data.get("needs_reply", []),
+        "worth_knowing": data.get("worth_knowing", []),
+        "handled_count": sum(c["count"] for c in categories),
+        "handled_categories": categories,
+        "sent": data.get("sent", []),
+    }
+
+
+@router.post("/inbox/notes/clear")
+def clear_notes(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """The Worth-knowing 'Clear' button: mark every note as seen/settled."""
+    from sqlalchemy import select as _select
+    n = 0
+    for m in db.scalars(_select(InboxMessage).where(
+            InboxMessage.user_id == user_id, InboxMessage.tier == "worth_knowing",
+            InboxMessage.settled.is_(False))):
+        m.settled = True
+        n += 1
+    append_event(db, user_id=user_id, type="notes_cleared", agent="inbox",
+                 domain="inbox", payload={"count": n})
+    db.commit()
+    return {"cleared": n}
