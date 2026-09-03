@@ -18,6 +18,12 @@ from sqlalchemy.orm import Session
 from .llm.provider import LLMProvider
 from .models import Person, utcnow
 
+# The model's own verdict outranks the address heuristic: profiles it calls
+# automated/marketing are services, not people.
+_SERVICE_RE = re.compile(
+    r"automat|marketing|loyalty program|notification sender|promotional"
+    r"|ride[- ]hailing|newsletter|account service|drip|mailing list", re.I)
+
 _NOISE_RE = re.compile(
     r"no[-._ ]?reply|do[-._ ]?not[-._ ]?reply|notifications?@|mailer|alerts?"
     r"|newsletter|digest|updates?@|info@|support@|billing@|receipts?@"
@@ -68,6 +74,8 @@ def update_person(db: Session, provider: LLMProvider, user_id: str, *,
     if not is_human_sender(addr):
         return None
     person = get_person(db, user_id, addr)
+    if person is not None and _SERVICE_RE.search(person.relationship or ""):
+        return None  # judged a service before; don't spend another look
     if person is None:
         person = Person(user_id=user_id, email=addr, name=name[:200])
         db.add(person)
@@ -104,13 +112,17 @@ def update_person(db: Session, provider: LLMProvider, user_id: str, *,
     person.tone = str(parsed.get("tone", ""))[:250]
     person.summary = str(parsed.get("summary", ""))[:1500]
     person.facts = [str(f)[:200] for f in (parsed.get("facts") or [])][:8]
+    if _SERVICE_RE.search(person.relationship) or _SERVICE_RE.search(person.summary[:200]):
+        db.delete(person)
+        return None
     return person
 
 
 def people_for_voice(db: Session, user_id: str, limit: int = 5) -> list[dict]:
     """The composer's grounding: who the user knows, freshest first."""
     rows = db.scalars(select(Person).where(Person.user_id == user_id)
-                      .order_by(Person.last_seen.desc()).limit(limit))
+                      .order_by(Person.last_seen.desc()).limit(limit * 2))
+    rows = [p for p in rows if not _SERVICE_RE.search(p.relationship or "")][:limit]
     return [{
         "email": p.email, "name": p.name, "relationship": p.relationship,
         "tone": p.tone, "summary": p.summary, "facts": (p.facts or [])[:8],
