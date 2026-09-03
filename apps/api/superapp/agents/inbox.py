@@ -82,6 +82,11 @@ DRAFT_SYSTEM = (
     "placeholder like [time]. NEVER invent names, facts, times, or commitments "
     "not present in the email or the provided context. If you sign at all, "
     "sign exactly as you_are.name — no other name may appear as the sender. "
+    "Write like a human typed it in thirty seconds: flowing sentences in one "
+    "or two short paragraphs. Never use em dashes or hyphens as punctuation — "
+    "commas and periods only. No bullet points, no headers, no stray "
+    "mid-sentence line breaks; a blank line between paragraphs only. "
+    "Greeting on its own line, body, then the name. "
     "Output only the reply body."
 )
 

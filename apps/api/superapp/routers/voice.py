@@ -49,6 +49,13 @@ CONVERSE_SYSTEM = (
     "Send ONLY when they explicitly say to send THIS message: "
     "action=send_draft with draft_id. Never send unasked. If they decline, "
     "move on gracefully.\n"
+    "WRITING STYLE for any email you compose (replies and new mail): write "
+    "like the person texts — warm, plain, flowing sentences in one or two "
+    "short paragraphs. NEVER use em dashes or hyphens as punctuation; use "
+    "commas and periods. No bullet points, no headers, no odd mid-sentence "
+    "line breaks — a blank line between paragraphs only. Greeting on its own "
+    "line, body, then their name. It must read like a human typed it in "
+    "thirty seconds, not like an assistant formatted it.\n"
     "Writing a NEW email (not a reply): they must give you the address — "
     "NEVER guess or invent one. Compose it in their voice, read it back in "
     "`say` (action=none, listen=true). Only after they explicitly confirm "
@@ -349,6 +356,21 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
         token = get_token(db, user_id=user_id, provider=f"gmail:{accts[0].email}")
         client = GmailClient(json.loads(token) if token else None)
         subject = parsed.get("subject") or "(no subject)"
+        # Idempotency: a duplicate action tag (stream retries) or a repeated
+        # model emission must never mail someone twice. Same recipient +
+        # same words inside ten minutes = the same send.
+        from datetime import datetime, timedelta, timezone as _tz
+
+        from sqlalchemy import select as _select
+
+        from ..models import Event
+        cutoff = datetime.now(_tz.utc) - timedelta(minutes=10)
+        for e in db.scalars(_select(Event).where(
+                Event.user_id == user_id, Event.type == "email_sent_new",
+                Event.created_at >= cutoff).order_by(Event.created_at.desc()).limit(10)):
+            if (e.payload.get("to") == addr
+                    and e.payload.get("body", "")[:500] == parsed["reply_body"][:500]):
+                return {"say": "Already sent — it went to them a moment ago."}
         sent_id = client.send_new(to_addr=addr, subject=subject, body=parsed["reply_body"])
         append_event(db, user_id=user_id, type="email_sent_new", agent="orb", domain="inbox",
                      payload={"to": addr, "subject": subject,
