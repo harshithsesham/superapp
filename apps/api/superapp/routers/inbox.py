@@ -79,6 +79,9 @@ def gmail_callback(code: str, state: str = "", db: Session = Depends(get_db)):
     token = client.exchange_code(code)
     email = GmailClient(token).profile()["emailAddress"]
     _connect(db, user_id=user_id, email=email, token=token)
+    from ..agents.inbox import _heal_reauth
+    _heal_reauth(db, user_id)
+    db.commit()
     return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
 <body style='font-family:-apple-system,sans-serif;background:#08070E;color:#F4F2FA;
@@ -255,8 +258,21 @@ def inbox_state(user_id: str = Depends(current_user_id), db: Session = Depends(g
         Event.user_id == user_id, Event.type == "inbox_synced")
         .order_by(Event.created_at.desc()).limit(1))
 
+    from ..models import UserFact
+    flag = db.scalar(_select(UserFact).where(
+        UserFact.user_id == user_id, UserFact.domain == "inbox",
+        UserFact.key == "reauth_needed"))
+    reauth = None
+    if flag and (flag.value or {}).get("needed"):
+        client = GmailClient()
+        reauth = {"needed": True,
+                  "email": (flag.value or {}).get("email", ""),
+                  "auth_url": None if client.stubbed
+                  else client.auth_url(state=_sign_state(user_id))}
+
     return {
         "connected": data.get("connected", False),
+        "reauth": reauth,
         "synced_at": last_sync.created_at.isoformat() if last_sync else None,
         "needs_reply": data.get("needs_reply", []),
         "worth_knowing": data.get("worth_knowing", []),

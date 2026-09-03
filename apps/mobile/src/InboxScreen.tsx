@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  Linking,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -49,6 +50,7 @@ type HandledCat = { name: string; n: string; count: number };
 type SentItem = { to_name: string; to_addr: string; subject: string; body: string; sent_at: string };
 type InboxState = {
   connected: boolean; synced_at: string | null;
+  reauth: { needed: boolean; email: string; auth_url: string | null } | null;
   needs_reply: Ask[]; worth_knowing: Note[];
   handled_count: number; handled_categories: HandledCat[]; sent: SentItem[];
 };
@@ -162,6 +164,22 @@ export function InboxScreen({
           </View>
           <View style={s.liveChip}><Text style={s.liveText}>LIVE</Text></View>
         </View>
+
+        {state.reauth?.needed ? (
+          <View style={s.reauthBanner}>
+            <Text style={s.reauthTitle}>Google signed Nano out</Text>
+            <Text style={s.reauthBody}>
+              Mail stopped syncing{state.reauth.email ? ` for ${state.reauth.email}` : ""}.
+              Reconnect and the backlog flows right in.
+            </Text>
+            {state.reauth.auth_url ? (
+              <Pressable style={[s.primaryBtn, { alignSelf: "flex-start", marginTop: 12 }]}
+                         onPress={() => Linking.openURL(state.reauth!.auth_url!)}>
+                <Text style={s.primaryText}>Reconnect Gmail</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
 
         <View style={s.sectionHead}>
           <Text style={s.sectionTitle}>Needs you</Text>
@@ -503,6 +521,9 @@ const s = StyleSheet.create({
   sub: { fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: C.muted, marginTop: 4 },
   liveChip: { borderWidth: 1, borderColor: "rgba(124,247,196,0.4)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
   liveText: { fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: C.mint },
+  reauthBanner: { borderRadius: 18, borderWidth: 1, borderColor: "rgba(255,157,168,0.45)", backgroundColor: "rgba(255,157,168,0.07)", padding: 16, marginTop: 22 },
+  reauthTitle: { fontFamily: SANS_SEMI, fontSize: 15, color: C.rose },
+  reauthBody: { fontFamily: SANS, fontSize: 13, lineHeight: 19, color: C.body, marginTop: 6 },
   sectionHead: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", marginTop: 30, marginBottom: 10 },
   sectionTitle: { fontFamily: SERIF, fontSize: 24, color: C.text },
   count: { fontFamily: SERIF, fontSize: 18, color: C.lav },

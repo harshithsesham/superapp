@@ -19,6 +19,7 @@ without an explicit user tap on a draft.
 import json
 from datetime import datetime, timezone
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -187,6 +188,40 @@ def _draft_reply(db: Session, context: ContextSlice, provider: LLMProvider, msg)
     return resp.text.strip()
 
 
+def _flag_reauth(db: Session, user_id: str, email: str) -> None:
+    from datetime import datetime, timezone
+
+    from ..models import UserFact
+    from ..push import send_push
+    from ..substrate.facts import write_fact
+
+    existing = db.scalar(select(UserFact).where(
+        UserFact.user_id == user_id, UserFact.domain == "inbox",
+        UserFact.key == "reauth_needed"))
+    already = bool(existing and (existing.value or {}).get("needed"))
+    write_fact(db, user_id=user_id, domain="inbox", key="reauth_needed",
+               value={"needed": True, "email": email,
+                      "since": datetime.now(timezone.utc).isoformat()},
+               confidence=1.0, source_agent="inbox")
+    if not already:
+        send_push(db, user_id=user_id, title="Nano — Gmail reconnect needed",
+                  body="Google signed Nano out of your mail. Open the inbox "
+                       "and tap Reconnect — takes ten seconds.",
+                  agent="inbox")
+
+
+def _heal_reauth(db: Session, user_id: str) -> None:
+    from ..models import UserFact
+    from ..substrate.facts import write_fact
+
+    existing = db.scalar(select(UserFact).where(
+        UserFact.user_id == user_id, UserFact.domain == "inbox",
+        UserFact.key == "reauth_needed"))
+    if existing and (existing.value or {}).get("needed"):
+        write_fact(db, user_id=user_id, domain="inbox", key="reauth_needed",
+                   value={"needed": False}, confidence=1.0, source_agent="inbox")
+
+
 def _sync(db: Session, context: ContextSlice, trigger: dict) -> ThinkResult:
     settings = get_settings()
     provider = LLMProvider()
@@ -196,7 +231,17 @@ def _sync(db: Session, context: ContextSlice, trigger: dict) -> ThinkResult:
     for acct in accounts(db, context.user_id):
         token = get_token(db, user_id=context.user_id, provider=f"gmail:{acct.email}")
         client = GmailClient(json.loads(token) if token else None)
-        msgs, new_hid = client.new_messages(acct.history_id)
+        try:
+            msgs, new_hid = client.new_messages(acct.history_id)
+        except httpx.HTTPStatusError as exc:
+            # Google signs apps out (revoked grants, 7-day testing-mode
+            # tokens). Flag it once, tell the person once, keep the app
+            # honest instead of silently rendering "connected".
+            if exc.response.status_code in (400, 401) and "oauth2" in str(exc.request.url):
+                _flag_reauth(db, context.user_id, acct.email)
+                continue
+            raise
+        _heal_reauth(db, context.user_id)
         acct.history_id = new_hid
         for raw in msgs:
             msg = insert_message(db, user_id=context.user_id, account_email=acct.email, msg=raw)
