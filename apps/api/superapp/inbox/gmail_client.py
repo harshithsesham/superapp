@@ -151,7 +151,9 @@ class GmailClient:
         filtered by _parse, same as live sync."""
         if self.stubbed:
             return []
-        data = self._get("/messages", labelIds="INBOX", maxResults=min(n * 3, 100))
+        # Ask for Primary directly: recent INBOX ids are mostly category-tab
+        # noise, which starves the fill after filtering.
+        data = self._get("/messages", q="category:primary", maxResults=min(n * 2, 100))
         msgs: list[dict] = []
         for ref in data.get("messages", []):
             if len(msgs) >= n:
