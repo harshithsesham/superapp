@@ -282,6 +282,16 @@ def inbox_state(user_id: str = Depends(current_user_id), db: Session = Depends(g
     }
 
 
+@router.post("/inbox/backfill")
+def backfill_inbox(background: BackgroundTasks,
+                   user_id: str = Depends(current_user_id),
+                   db: Session = Depends(get_db)):
+    """Ingest ~40 recent Primary emails (first fill). Triage runs in the
+    background; the screen catches up on the next refresh."""
+    background.add_task(_background_think, "inbox", user_id, {"kind": "backfill"})
+    return {"ok": True}
+
+
 @router.post("/inbox/notes/clear")
 def clear_notes(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     """The Worth-knowing 'Clear' button: mark every note as seen/settled."""

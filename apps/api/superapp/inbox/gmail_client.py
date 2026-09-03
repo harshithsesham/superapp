@@ -145,6 +145,27 @@ class GmailClient:
                 raise
         return [m for m in msgs if m], new_hid
 
+    def backfill(self, n: int = 40) -> list[dict]:
+        """Recent Primary-inbox mail for a first fill: plain list + fetch,
+        no history cursor. Category tabs (promos/social/updates) are
+        filtered by _parse, same as live sync."""
+        if self.stubbed:
+            return []
+        data = self._get("/messages", labelIds="INBOX", maxResults=min(n * 3, 100))
+        msgs: list[dict] = []
+        for ref in data.get("messages", []):
+            if len(msgs) >= n:
+                break
+            try:
+                parsed = self._parse(self._get(f"/messages/{ref['id']}", format="full"))
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (403, 404, 410):
+                    continue
+                raise
+            if parsed:
+                msgs.append(parsed)
+        return msgs
+
     def _parse(self, raw: dict) -> dict | None:
         labels = set(raw.get("labelIds", []))
         if "INBOX" not in labels or labels & SKIP_LABELS:

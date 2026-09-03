@@ -248,6 +248,16 @@ def _sync(db: Session, context: ContextSlice, trigger: dict) -> ThinkResult:
             raise
         _heal_reauth(db, context.user_id)
         acct.history_id = new_hid
+        backfill_ids: set[str] = set()
+        if trigger.get("kind") in ("backfill", "user_refresh"):
+            from sqlalchemy import func
+            from ..models import InboxMessage as _IM
+            known = db.scalar(select(func.count()).select_from(_IM).where(
+                _IM.user_id == context.user_id)) or 0
+            if trigger.get("kind") == "backfill" or known < 15:
+                old_mail = client.backfill(40)
+                backfill_ids = {m["gmail_msg_id"] for m in old_mail}
+                msgs = list(msgs) + old_mail
         for raw in msgs:
             msg = insert_message(db, user_id=context.user_id, account_email=acct.email, msg=raw)
             if msg is None:
@@ -262,7 +272,9 @@ def _sync(db: Session, context: ContextSlice, trigger: dict) -> ThinkResult:
             if msg.tier == "cleared":
                 if _verify_clear(db, context, provider, msg):
                     msg.verified_clear = True
-                    if settings.gmail_scope_tier == "modify":
+                    # Historical fill never rearranges the real mailbox.
+                    if (settings.gmail_scope_tier == "modify"
+                            and msg.gmail_msg_id not in backfill_ids):
                         client.archive(msg.gmail_msg_id)
                         msg.archived = True
                         counts["archived"] += 1
@@ -339,7 +351,7 @@ def _maybe_distill_style(db: Session, context: ContextSlice, result: ThinkResult
 
 def inbox_think(db: Session, *, trigger: dict, context: ContextSlice, run_id: str) -> ThinkResult:
     # Pull-to-refresh means "check my mail" — same as a sync trigger.
-    if trigger.get("kind") in ("email_sync", "user_refresh"):
+    if trigger.get("kind") in ("email_sync", "user_refresh", "backfill"):
         return _sync(db, context, trigger)
     result = ThinkResult()
     _maybe_distill_style(db, context, result)
