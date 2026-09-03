@@ -19,8 +19,9 @@ from .llm.provider import LLMProvider
 from .models import Person, utcnow
 
 _NOISE_RE = re.compile(
-    r"no-?reply|notifications?@|mailer|newsletter|digest|updates?@|info@"
-    r"|support@|billing@|receipts?@|hello@|team@|news@|noreply|do-not-reply",
+    r"no[-._ ]?reply|do[-._ ]?not[-._ ]?reply|notifications?@|mailer|alerts?"
+    r"|newsletter|digest|updates?@|info@|support@|billing@|receipts?@"
+    r"|hello@|team@|news@|service@|accounts?@|security@|verify|automated",
     re.I)
 
 PERSON_SYSTEM = (
