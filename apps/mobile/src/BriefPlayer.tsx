@@ -120,24 +120,56 @@ export function BriefPlayer({
 
   const seg = segments?.[idx];
 
-  // Caption types itself; the same line is spoken when voice is on.
+  // Captions lock to the audio: word timings come from the same TTS
+  // synthesis (speak_timed), so text and voice can never drift. Falls back
+  // to a steady reveal when timings are unavailable.
+  const wordTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const [timedWords, setTimedWords] = useState<{ w: string; t: number }[] | null>(null);
   useEffect(() => {
     if (!seg) return;
     setCapN(0);
+    setTimedWords(null);
+    wordTimers.current.forEach(clearTimeout);
+    wordTimers.current = [];
     if (capTimer.current) clearInterval(capTimer.current);
-    capTimer.current = setInterval(() => {
-      setCapN((n) => {
-        if (n + 1 >= seg.say.length) {
-          if (capTimer.current) clearInterval(capTimer.current);
-          return seg.say.length;
+    let cancelled = false;
+    (async () => {
+      let words: { w: string; t: number }[] = [];
+      if (voiceOn) {
+        try {
+          const r = await fetch(
+            `${apiUrl}/v1/voice/speak_timed?text=${encodeURIComponent(seg.say)}`,
+            { headers: auth });
+          if (r.ok) words = (await r.json()).words ?? [];
+        } catch { /* fall back below */ }
+      }
+      if (cancelled) return;
+      if (words.length) {
+        setTimedWords(words);
+        setSayUrl(`${apiUrl}/v1/voice/speak_timed_audio?text=${encodeURIComponent(seg.say)}`);
+        words.forEach((w, i) => {
+          wordTimers.current.push(setTimeout(() => setCapN(i + 1), Math.max(0, w.t * 1000)));
+        });
+      } else {
+        // No timings: steady character reveal, plain /speak audio.
+        if (voiceOn) {
+          setSayUrl(`${apiUrl}/v1/voice/speak?text=${encodeURIComponent(seg.say)}`);
         }
-        return n + 2;
-      });
-    }, 42);
-    if (voiceOn) {
-      setSayUrl(`${apiUrl}/v1/voice/speak?text=${encodeURIComponent(seg.say)}`);
-    }
+        capTimer.current = setInterval(() => {
+          setCapN((n) => {
+            if (n + 1 >= seg.say.length) {
+              if (capTimer.current) clearInterval(capTimer.current);
+              return seg.say.length;
+            }
+            return n + 2;
+          });
+        }, 42);
+      }
+    })();
     return () => {
+      cancelled = true;
+      wordTimers.current.forEach(clearTimeout);
+      wordTimers.current = [];
       if (capTimer.current) clearInterval(capTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -273,7 +305,7 @@ export function BriefPlayer({
           </View>
           <View style={{ flex: 1, minWidth: 0, paddingTop: 3 }}>
             <Text style={s.caption}>
-              {seg.say.slice(0, capN)}
+              {timedWords ? timedWords.slice(0, capN).map((w) => w.w).join(" ") : seg.say.slice(0, capN)}
               <Text style={s.caret}>▎</Text>
             </Text>
             <Text style={s.mode}>{voiceOn ? "SPEAKING · TAP NEXT TO SKIP" : "READING · VOICE OFF"}</Text>

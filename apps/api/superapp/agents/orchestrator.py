@@ -96,9 +96,152 @@ def _remember_day(db: Session, context: ContextSlice) -> int:
     return n
 
 
+WAKE_SYSTEM = (
+    "You are the wake-decision layer of a personal chief of staff. You see a "
+    "digest of pending signals and when the person was last nudged about "
+    "each. The DEFAULT IS SILENCE: wake only if a thoughtful human assistant "
+    "would tap the person's shoulder right now — a reply aging toward a real "
+    "deadline, access broken for hours, something they said matters going "
+    "stale. Routine state (a few unread notes, watches ticking along) is "
+    "never worth a wake. If waking, compose ONE calm message under 140 "
+    "characters saying the single most important thing and what to do."
+)
+WAKE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "wake": {"type": "boolean"},
+        "reason": {"type": "string"},
+        "message": {"type": "string"},
+        "topics": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["wake", "reason", "message", "topics"],
+    "additionalProperties": False,
+}
+
+
+def _heartbeat_signals(db: Session, context: ContextSlice) -> list[dict]:
+    """Cheap, LLM-free signal gathering. Each signal has a stable topic key
+    so the dedup memory can prevent re-nagging."""
+    from datetime import timedelta
+
+    from ..models import AgentTask, InboxDraft, InboxMessage, UserFact
+
+    now = datetime.now(timezone.utc)
+    signals: list[dict] = []
+
+    inbox = context.domain_data.get("inbox", {})
+    for a in inbox.get("needs_reply", []):
+        d = a.get("draft") or {}
+        if d.get("status") == "sent" or d.get("deferred"):
+            continue
+        try:
+            age_h = (now - datetime.fromisoformat(a["received_at"])).total_seconds() / 3600
+        except (KeyError, ValueError):
+            age_h = 0
+        signals.append({"topic": f"ask:{a['id']}", "kind": "reply_waiting",
+                        "from": a.get("from_name", ""), "subject": a.get("subject", ""),
+                        "urgency": a.get("why_now", ""), "age_hours": round(age_h, 1)})
+
+    overdue = db.scalar(select(InboxDraft).where(
+        InboxDraft.user_id == context.user_id, InboxDraft.status.in_(("waiting", "edited")),
+        InboxDraft.defer_until.isnot(None), InboxDraft.defer_until < now).limit(1))
+    if overdue is not None:
+        signals.append({"topic": f"deferred:{overdue.id}", "kind": "deferred_due",
+                        "note": "a held draft passed its 6pm"})
+
+    flag = db.scalar(select(UserFact).where(
+        UserFact.user_id == context.user_id, UserFact.domain == "inbox",
+        UserFact.key == "reauth_needed"))
+    if flag and (flag.value or {}).get("needed"):
+        signals.append({"topic": "reauth", "kind": "gmail_disconnected",
+                        "since": (flag.value or {}).get("since", "")})
+
+    cutoff = now - timedelta(hours=6)
+    failed = list(db.scalars(select(AgentTask).where(
+        AgentTask.user_id == context.user_id, AgentTask.status == "failed",
+        AgentTask.updated_at > cutoff).limit(3)))
+    for t in failed:
+        signals.append({"topic": f"taskfail:{t.id}", "kind": "errand_failed",
+                        "errand": t.instruction[:80]})
+    return signals
+
+
+def _heartbeat(db: Session, context: ContextSlice, result: ThinkResult) -> ThinkResult:
+    """The silent heartbeat: gather signals cheaply, let Haiku decide if any
+    are worth a human's attention, speak at most once — else stay silent."""
+    from ..models import UserFact
+
+    provider = LLMProvider()
+    now = datetime.now(timezone.utc)
+
+    state_fact = db.scalar(select(UserFact).where(
+        UserFact.user_id == context.user_id, UserFact.domain == "orchestrator",
+        UserFact.key == "heartbeat_state"))
+    notified: dict = (state_fact.value or {}).get("notified", {}) if state_fact else {}
+
+    def fresh(topic: str, hours: float = 8.0) -> bool:
+        ts = notified.get(topic)
+        if not ts:
+            return True
+        try:
+            return (now - datetime.fromisoformat(ts)).total_seconds() > hours * 3600
+        except ValueError:
+            return True
+
+    signals = [s for s in _heartbeat_signals(db, context)
+               if fresh(s["topic"], 24.0 if s["topic"] == "reauth" else 8.0)]
+    if not signals:
+        result.event_writes.append(EventWrite(
+            type="heartbeat", payload={"wake": False, "signals": 0}))
+        return result
+
+    # Cheap wake decision (task=classification routes to Haiku at low effort).
+    resp = provider.complete(
+        db, user_id=context.user_id, agent="orchestrator", task="classification",
+        system=WAKE_SYSTEM,
+        prompt=json.dumps({
+            "local_utc": now.isoformat(timespec="minutes"),
+            "signals": signals[:8],
+        }, sort_keys=True),
+        schema=WAKE_SCHEMA,
+    )
+    wake, message, topics = False, "", []
+    if not (resp.stubbed or resp.refused):
+        try:
+            parsed = json.loads(resp.text)
+            wake = bool(parsed.get("wake"))
+            message = str(parsed.get("message", ""))[:170]
+            topics = [str(t)[:80] for t in parsed.get("topics", [])][:8]
+        except json.JSONDecodeError:
+            wake = False
+
+    if wake and message:
+        send_push(db, user_id=context.user_id, title="Nano",
+                  body=message, agent="orchestrator")
+        try:
+            from ..config import get_settings as _gs
+            from ..routers.telegram import _chat_map, _send as _tg_send
+            for chat_id, uid in _chat_map().items():
+                if uid == context.user_id:
+                    _tg_send(chat_id, message)
+        except Exception:  # noqa: BLE001
+            pass
+        for t in (topics or [s["topic"] for s in signals]):
+            notified[t] = now.isoformat()
+        result.fact_writes.append(FactWrite(
+            domain="orchestrator", key="heartbeat_state",
+            value={"notified": dict(list(notified.items())[-40:])}, confidence=1.0))
+    result.event_writes.append(EventWrite(
+        type="heartbeat", payload={"wake": wake, "signals": len(signals),
+                                   "message": message if wake else ""}))
+    return result
+
+
 def orchestrator_think(db: Session, *, trigger: dict, context: ContextSlice,
                        run_id: str) -> ThinkResult:
     result = ThinkResult()
+    if trigger.get("kind") == "heartbeat":
+        return _heartbeat(db, context, result)
     provider = LLMProvider()
 
     resp = provider.complete(

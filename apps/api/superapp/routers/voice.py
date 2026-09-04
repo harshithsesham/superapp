@@ -517,6 +517,29 @@ def command(body: CommandBody, user_id: str = Depends(current_user_id),
     return {"intent": intent, "screen": result["screen"], "say": result["say"]}
 
 
+@router.get("/speak_timed")
+def speak_timed(text: str, user_id: str = Depends(current_user_id)):
+    """TTS with word-start timestamps: {audio_b64, words:[{w,t}]} so captions
+    can lock to the audio instead of guessing a reveal pace."""
+    from ..voice import tts_timed
+
+    return tts_timed(text[:600])
+
+
+@router.get("/speak_timed_audio")
+def speak_timed_audio(text: str, user_id: str = Depends(current_user_id)):
+    """The audio half of speak_timed — same synthesis, so captions and
+    sound can never drift apart."""
+    import base64
+
+    from ..voice import tts_timed
+
+    data = tts_timed(text[:600])
+    if not data.get("audio_b64"):
+        return Response(status_code=204)
+    return Response(content=base64.b64decode(data["audio_b64"]), media_type="audio/mpeg")
+
+
 @router.get("/speak")
 def speak(text: str, user_id: str = Depends(current_user_id)):
     audio = tts(text[:600])
