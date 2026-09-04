@@ -30,7 +30,6 @@ export function NanoOrb({
   onActed,
   openSignal,
   stageSignal,
-  hideBall,
 }: {
   apiUrl: string;
   auth: Record<string, string>;
@@ -39,7 +38,6 @@ export function NanoOrb({
   onActed?: () => void;
   openSignal?: number;
   stageSignal?: number;
-  hideBall?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
@@ -342,10 +340,16 @@ export function NanoOrb({
 
   useEffect(() => {
     if (!stageSignal) return;
-    setStage(true);
     if (!openRef.current) openOrb();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stageSignal]);
+
+  // There is no edge ball any more: the dock IS the conversation's presence.
+  // It appears whenever the session is open and leaves when it ends — no
+  // invisible listening, ever.
+  useEffect(() => {
+    setStage(open);
+  }, [open]);
 
   // Captions: reveal Nano's words as it speaks; a fresh interruption wipes
   // the slate so the conversation restarts clean, like talking to a person.
@@ -412,10 +416,15 @@ export function NanoOrb({
           <Text style={o.vdockLabel}>
             NANO  ·  {phase === "speaking" ? "SPEAKING" : phase === "thinking" ? "THINKING" : "LISTENING"}
           </Text>
-          <Pressable onPress={() => setStage(false)} hitSlop={12}>
+          <Pressable onPress={collapse} hitSlop={12}>
             <Text style={{ color: "#8A87A3", fontSize: 16 }}>✕</Text>
           </Pressable>
         </View>
+        {progress > 0 ? (
+          <View style={o.vdockProgress}>
+            <View style={[o.vdockProgressFill, { width: `${Math.round(progress * 100)}%` }]} />
+          </View>
+        ) : null}
         {transcript ? (
           <Text style={o.vdockHeard} numberOfLines={1}>“{transcript}”</Text>
         ) : null}
@@ -431,44 +440,6 @@ export function NanoOrb({
         ) : null}
       </View>
     ) : null}
-    {hideBall ? null : (
-    <View pointerEvents="box-none" style={[o.dock, { top: insets.top + 64 }]}>
-      <Animated.View
-        style={{
-          transform: [
-            { translateX: orbTranslateX },
-            { translateY: orbTranslateY },
-            { scale: Animated.multiply(orbScale, scale) },
-          ],
-        }}
-      >
-        <Pressable onPress={onOrbTap} hitSlop={16}>
-          <LinearGradient
-            colors={["#C7B8FF", "#6D5BD0", "#2A2050"]}
-            start={{ x: 0.2, y: 0.1 }}
-            end={{ x: 0.8, y: 1 }}
-            style={o.orb}
-          />
-        </Pressable>
-      </Animated.View>
-      {!stage && open && (progress > 0 || phase === "listening" || phase === "thinking" || !!say) ? (
-        <View pointerEvents="box-none" style={o.bubble}>
-          {progress > 0 ? (
-            <View style={o.progressTrack}>
-              <View style={[o.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
-            </View>
-          ) : null}
-          {phase === "listening" ? (
-            <Text style={o.transcript}>{transcript || "listening…"}</Text>
-          ) : phase === "thinking" ? (
-            <Text style={o.status}>·  ·  ·</Text>
-          ) : say ? (
-            <Text style={o.say}>{say}</Text>
-          ) : null}
-        </View>
-      ) : null}
-    </View>
-    )}
     </>
   );
 }
@@ -493,6 +464,11 @@ const o = StyleSheet.create({
     fontFamily: "JetBrainsMono_400Regular", fontSize: 10, letterSpacing: 3,
     color: "#8A87A3", marginLeft: 4,
   },
+  vdockProgress: {
+    height: 2, borderRadius: 1, marginTop: 12,
+    backgroundColor: "rgba(199,184,255,0.18)", overflow: "hidden",
+  },
+  vdockProgressFill: { height: 2, backgroundColor: "#C7B8FF" },
   vdockHeard: {
     fontFamily: "InstrumentSans_400Regular", fontSize: 13,
     color: "#8A87A3", marginTop: 10,

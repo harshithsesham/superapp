@@ -696,7 +696,6 @@ function App() {
         auth={AUTH}
         openSignal={orbSignal}
         stageSignal={stageSignal}
-        hideBall={screenName === "inbox" || screenName === "hub" || screenName === "profile"}
         onNavigate={onNavigate}
         onRefreshInbox={() => {
           setScreenName("inbox");
