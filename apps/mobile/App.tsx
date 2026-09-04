@@ -596,6 +596,13 @@ function App() {
       >
         {error ? (
           <Text style={styles.error}>{error}</Text>
+        ) : screenName === "inbox" && screenCache.current.hub ? (
+          <HubScreen
+            screen={screenCache.current.hub}
+            onNavigate={onNavigate}
+            onReaction={onReaction}
+            onPlayBrief={() => setBriefPlaying(true)}
+          />
         ) : screenName === "home" || screenName === "flights" || screenName === "inbox" || screenName === "profile" ? null : screen ? (
           screenName === "hub" ? (
             <HubScreen
@@ -620,7 +627,7 @@ function App() {
       </ScrollView>
 
       {screenName === "inbox" && !error ? (
-        <View style={{ position: "absolute", top: 60, left: 0, right: 0, bottom: 0 }}>
+        <View style={StyleSheet.absoluteFillObject}>
           <InboxScreen apiUrl={apiUrl} auth={AUTH} onBack={() => setScreenName("hub")} />
         </View>
       ) : null}

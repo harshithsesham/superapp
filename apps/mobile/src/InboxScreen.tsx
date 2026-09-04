@@ -1,8 +1,8 @@
-// The inbox, design-true (Nano V1): Needs you (the email, your draft, the
-// consequence, one tap to send or hold), Worth knowing (expandable, with why
-// it surfaced), Handled without you (expandable category breakdown), Sent.
-// Voice lives in the edge-docked orb — the same realtime conversation as
-// everywhere else, interruptible mid-sentence.
+// Inbox Zero, matched to Nano V1 (6): a bottom sheet over the dimmed hub —
+// drag handle, compact header, Needs you decision cards (THEY WROTE ->
+// NANO WROTE BACK), Worth knowing with auto-replied exchanges (THEY ASKED /
+// I SENT) and plain notes, and the handled row that expands into
+// "where it went". Live data from /v1/inbox/state.
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -20,10 +20,8 @@ import {
 } from "react-native";
 
 const C = {
-  bg: "#04040A", panel: "rgba(25,18,51,0.5)", panel2: "#0E0C18",
-  border: "rgba(199,184,255,0.14)", text: "#F4F2FA", muted: "#8A87A3",
-  body: "#C9C5DA", lav: "#C7B8FF", mint: "#7CF7C4", rose: "#FF9DA8",
-  onAccent: "#14101F",
+  text: "#F4F2FA", muted: "#8A87A3", lav: "#C7B8FF", mint: "#7CF7C4",
+  rose: "#FF9DA8",
 };
 const MONO = "JetBrainsMono_400Regular";
 const SERIF = "InstrumentSerif_400Regular";
@@ -32,6 +30,14 @@ const SANS_SEMI = "InstrumentSans_600SemiBold";
 const TILES: [string, string][] = [
   ["#818CF8", "#4338CA"], ["#5E7CFF", "#25309B"], ["#7C6CFF", "#3B2E8C"],
 ];
+const CAT_COLORS: Record<string, string> = {
+  "Promotions and sales": "#FF9DA8",
+  "Newsletters": "#FFD9A0",
+  "Social notifications": "#818CF8",
+  "Automated notices": "#8A87A3",
+  "Receipts": "#7CF7C4",
+  "Other noise": "#6B6880",
+};
 
 type Draft = { id: string; body: string; status: string; deferred?: boolean };
 type Ask = {
@@ -40,18 +46,23 @@ type Ask = {
 };
 type Note = {
   id: string; from_name: string; from_addr: string; subject: string;
-  gist: string; why_now: string; kind: string; body: string;
+  gist: string; why_now: string; kind: string; body: string; draft?: Draft | null;
+};
+type HandledCat = { name: string; n: string; count: number };
+type InboxState = {
+  connected: boolean; synced_at: string | null;
+  reauth: { needed: boolean; email: string; auth_url: string | null } | null;
+  needs_reply: Ask[]; worth_knowing: Note[];
+  handled_count: number; handled_categories: HandledCat[];
+  auto_reply_kinds: string[];
 };
 
-// Swipe a row off the list: past the threshold it slides away and settles.
 function SwipeRow({ children, onDismiss }: {
   children: React.ReactNode; onDismiss: () => void;
 }) {
   const tx = useRef(new Animated.Value(0)).current;
   const pan = useRef(
     PanResponder.create({
-      // Grab early on a sideways move and never give the gesture back to
-      // the scroll view — that hand-off fight was the rigidity.
       onMoveShouldSetPanResponder: (_e, g) =>
         Math.abs(g.dx) > 6 && Math.abs(g.dx) > Math.abs(g.dy),
       onMoveShouldSetPanResponderCapture: (_e, g) =>
@@ -59,16 +70,13 @@ function SwipeRow({ children, onDismiss }: {
       onPanResponderTerminationRequest: () => false,
       onPanResponderMove: Animated.event([null, { dx: tx }], { useNativeDriver: false }),
       onPanResponderRelease: (_e, g) => {
-        // One committed swipe is enough: distance OR a flick of velocity.
         if (Math.abs(g.dx) > 56 || Math.abs(g.vx) > 0.45) {
           const dir = (g.dx || g.vx) > 0 ? 1 : -1;
           Animated.timing(tx, {
             toValue: dir * 480, duration: 140, useNativeDriver: true,
           }).start(onDismiss);
         } else {
-          Animated.spring(tx, {
-            toValue: 0, friction: 8, tension: 60, useNativeDriver: true,
-          }).start();
+          Animated.spring(tx, { toValue: 0, friction: 8, tension: 60, useNativeDriver: true }).start();
         }
       },
       onPanResponderTerminate: () =>
@@ -84,23 +92,13 @@ function SwipeRow({ children, onDismiss }: {
     </Animated.View>
   );
 }
-type HandledCat = { name: string; n: string; count: number };
-type SentItem = { to_name: string; to_addr: string; subject: string; body: string; sent_at: string };
-type InboxState = {
-  connected: boolean; synced_at: string | null;
-  reauth: { needed: boolean; email: string; auth_url: string | null } | null;
-  needs_reply: Ask[]; worth_knowing: Note[];
-  handled_count: number; handled_categories: HandledCat[]; sent: SentItem[];
-  auto_reply_kinds: string[];
-};
-
 
 function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  return ((parts[0]?.[0] ?? "?") + (parts[1]?.[0] ?? "")).toUpperCase();
+  const p = name.trim().split(/\s+/);
+  return ((p[0]?.[0] ?? "?") + (p[1]?.[0] ?? "")).toUpperCase();
 }
-function hhmm(iso: string): string {
-  return iso.length > 16 ? iso.slice(11, 16) : "";
+function hhmm(iso: string | null): string {
+  return iso && iso.length > 16 ? iso.slice(11, 16) : "";
 }
 
 export function InboxScreen({
@@ -113,10 +111,9 @@ export function InboxScreen({
   onBack: () => void;
 }) {
   const [state, setState] = useState<InboxState | null>(null);
-  const [openNote, setOpenNote] = useState<string | null>(null);
   const [openMail, setOpenMail] = useState<string | null>(null);
+  const [openNote, setOpenNote] = useState<string | null>(null);
   const [handledOpen, setHandledOpen] = useState(false);
-  const [sentOpen, setSentOpen] = useState<string | null>(null);
   const [busyDraft, setBusyDraft] = useState<string | null>(null);
   const [sentLocal, setSentLocal] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
@@ -136,7 +133,7 @@ export function InboxScreen({
     return () => { alive.current = false; clearInterval(t); };
   }, [refresh]);
 
-  const draftAction = useCallback(async (draftId: string, action: "send" | "defer") => {
+  const draftAction = useCallback(async (draftId: string, action: "send" | "defer" | "dismiss") => {
     if (busyDraft) return;
     setBusyDraft(draftId);
     try {
@@ -148,10 +145,10 @@ export function InboxScreen({
           : undefined,
       });
       if ((res.ok || res.status === 409) && action === "send") {
-        setSentLocal((s) => new Set(s).add(draftId));
+        setSentLocal((s0) => new Set(s0).add(draftId));
       }
       setTimeout(refresh, 1200);
-    } catch { /* next refresh tells the truth */ } finally {
+    } catch { /* refresh reconciles */ } finally {
       if (alive.current) setBusyDraft(null);
     }
   }, [apiUrl, auth, busyDraft, refresh]);
@@ -160,7 +157,7 @@ export function InboxScreen({
     setState((st) => st ? { ...st, worth_knowing: st.worth_knowing.filter((n) => n.id !== id) } : st);
     try {
       await fetch(`${apiUrl}/v1/inbox/notes/${id}/settle`, { method: "POST", headers: auth });
-    } catch { /* next refresh reconciles */ }
+    } catch { /* refresh reconciles */ }
   }, [apiUrl, auth]);
 
   const muteRule = useCallback(async (rule: { kind?: string; sender?: string }) => {
@@ -169,15 +166,6 @@ export function InboxScreen({
         method: "POST",
         headers: { ...auth, "Content-Type": "application/json" },
         body: JSON.stringify(rule),
-      });
-      refresh();
-    } catch { /* ignore */ }
-  }, [apiUrl, auth, refresh]);
-
-  const dismissDraft = useCallback(async (draftId: string) => {
-    try {
-      await fetch(`${apiUrl}/v1/inbox/drafts/${draftId}/dismiss`, {
-        method: "POST", headers: auth,
       });
       refresh();
     } catch { /* ignore */ }
@@ -194,13 +182,25 @@ export function InboxScreen({
     } catch { /* ignore */ }
   }, [apiUrl, auth, refresh]);
 
+  const autoReplySettings = useCallback(() => {
+    const kinds = state?.auto_reply_kinds ?? [];
+    if (!kinds.length) {
+      Alert.alert("Auto-reply", "No streams are on auto-reply yet. Turn one on from a draft card.");
+      return;
+    }
+    Alert.alert("Auto-replying to", kinds.join("\n"), [
+      ...kinds.map((k) => ({ text: `Stop: ${k}`, onPress: () => toggleAutoReply(k, true) })),
+      { text: "Done", style: "cancel" as const },
+    ]);
+  }, [state, toggleAutoReply]);
+
   const noteActions = useCallback((n: Note) => {
-    const opts: { text: string; onPress?: () => void; style?: "cancel" | "destructive" }[] = [];
-    if (n.kind) opts.push({ text: `Stop showing ${n.kind}`, onPress: () => muteRule({ kind: n.kind }) });
-    opts.push({ text: `Never from ${n.from_name}`, onPress: () => muteRule({ sender: n.from_addr }) });
-    opts.push({ text: "Dismiss this one", style: "destructive", onPress: () => settleNote(n.id) });
-    opts.push({ text: "Cancel", style: "cancel" });
-    Alert.alert(n.from_name, "What should I do with this kind of thing?", opts);
+    Alert.alert(n.from_name, "What should I do with this kind of thing?", [
+      ...(n.kind ? [{ text: `Stop showing ${n.kind}`, onPress: () => muteRule({ kind: n.kind }) }] : []),
+      { text: `Never from ${n.from_name}`, onPress: () => muteRule({ sender: n.from_addr }) },
+      { text: "Dismiss this one", style: "destructive" as const, onPress: () => settleNote(n.id) },
+      { text: "Cancel", style: "cancel" as const },
+    ]);
   }, [muteRule, settleNote]);
 
   const clearNotes = useCallback(async () => {
@@ -210,317 +210,313 @@ export function InboxScreen({
     } catch { /* ignore */ }
   }, [apiUrl, auth, refresh]);
 
-  if (!state) {
-    return <View style={s.center}><ActivityIndicator color={C.lav} /></View>;
-  }
-
-  const asks = state.needs_reply;
+  const asks = state?.needs_reply ?? [];
   const openAsks = asks.filter((a) => !a.draft?.deferred);
+  const autoNotes = (state?.worth_knowing ?? []).filter((n) => n.draft?.status === "sent");
+  const plainNotes = (state?.worth_knowing ?? []).filter((n) => n.draft?.status !== "sent");
 
   return (
-    <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <ScrollView
-        contentContainerStyle={s.scroll}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            tintColor={C.lav}
-            title="Checking your mail…"
-            titleColor={C.muted}
-            onRefresh={async () => {
-              setRefreshing(true);
-              try {
-                // Kick the sync think server-side, then pick up what it found.
-                await fetch(`${apiUrl}/v1/screen/inbox/refresh`, { method: "POST", headers: auth });
-              } catch { /* state refresh below still runs */ }
-              await refresh();
-              setTimeout(refresh, 6000);
-              if (alive.current) setRefreshing(false);
-            }}
-          />
-        }
-      >
-        <Pressable onPress={onBack} hitSlop={12} style={{ alignSelf: "flex-start" }}>
-          <Text style={s.backLink}>‹  MY HUB</Text>
-        </Pressable>
-        <View style={s.headRow}>
-          <View>
-            <Text style={s.title}>Inbox Zero</Text>
-            <Text style={s.sub}>
-              GMAIL{state.synced_at ? `  ·  SYNCED ${hhmm(state.synced_at)}` : ""}
+    <View style={s.backdrop}>
+      <LinearGradient colors={["#141232", "#0B0910"]} locations={[0, 0.58]} style={s.sheet}>
+        <View style={s.handle} />
+        <View style={s.header}>
+          <LinearGradient colors={["#818CF8", "#4338CA"]}
+                          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.headTile}>
+            <Text style={s.headTileText}>I</Text>
+          </LinearGradient>
+          <View style={{ flex: 1 }}>
+            <Text style={s.headName}>Inbox Zero</Text>
+            <Text style={s.headSub}>
+              Gmail{state?.synced_at ? ` · synced ${hhmm(state.synced_at)}` : ""}
             </Text>
           </View>
-          <View style={s.liveChip}><Text style={s.liveText}>LIVE</Text></View>
+          <Pressable onPress={onBack} hitSlop={12} style={{ padding: 8 }}>
+            <Text style={{ color: "rgba(255,255,255,0.6)", fontSize: 15 }}>✕</Text>
+          </Pressable>
         </View>
 
-        {state.reauth?.needed ? (
-          <View style={s.reauthBanner}>
-            <Text style={s.reauthTitle}>Google signed Nano out</Text>
-            <Text style={s.reauthBody}>
-              Mail stopped syncing{state.reauth.email ? ` for ${state.reauth.email}` : ""}.
-              Reconnect and the backlog flows right in.
-            </Text>
-            {state.reauth.auth_url ? (
-              <Pressable style={[s.primaryBtn, { alignSelf: "flex-start", marginTop: 12 }]}
-                         onPress={() => Linking.openURL(state.reauth!.auth_url!)}>
-                <Text style={s.primaryText}>Reconnect Gmail</Text>
-              </Pressable>
-            ) : null}
+        {!state ? (
+          <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+            <ActivityIndicator color={C.lav} />
           </View>
-        ) : null}
-
-        <View style={s.sectionHead}>
-          <Text style={s.sectionTitle}>Needs you</Text>
-          <Text style={s.count}>{openAsks.length}</Text>
-        </View>
-        {asks.length === 0 ? (
-          <Text style={s.empty}>Nothing needs your words right now.</Text>
-        ) : <View style={{ gap: 8 }}>{asks.map((a, i) => {
-          const sent = a.draft ? sentLocal.has(a.draft.id) || a.draft.status === "sent" : false;
-          const expanded = openMail === a.id || asks.length === 1;
-          const autoOn = a.kind
-            ? state.auto_reply_kinds.some((k) => k.toLowerCase() === a.kind.toLowerCase())
-            : false;
-          return (
-            <View key={a.id} style={[s.card, a.why_now ? s.cardUrgent : null]}>
-              <Pressable style={s.cardHead} onPress={() => setOpenMail(expanded ? null : a.id)}>
-                <LinearGradient colors={TILES[i % TILES.length]}
-                                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.tile}>
-                  <Text style={s.tileText}>{initials(a.from_name)}</Text>
-                </LinearGradient>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={s.from}>{a.from_name}</Text>
-                  <Text style={s.subject} numberOfLines={1}>{a.subject}</Text>
-                </View>
-                {a.why_now ? (
-                  <View style={s.chip}><Text style={s.chipText}>{a.why_now.toUpperCase().slice(0, 16)}</Text></View>
-                ) : null}
-              </Pressable>
-              {expanded ? (
-                <View style={{ paddingHorizontal: 15, paddingBottom: 15 }}>
-                  <View style={s.theyWrote}>
-                    <View style={{ flexDirection: "row", alignItems: "baseline" }}>
-                      <Text style={[s.panelLabel, { flex: 1 }]}>THEY WROTE</Text>
-                      <Text style={s.panelAt}>{hhmm(a.received_at)}</Text>
-                    </View>
-                    <Text style={s.panelBody} numberOfLines={openMail === a.id ? undefined : 6}>
-                      {a.body.trim()}
-                    </Text>
-                  </View>
-                  <View style={s.connector}>
-                    <View style={s.connLine} />
-                    <Text style={{ color: "rgba(199,184,255,0.6)", fontSize: 11 }}>{"\u2193"}</Text>
-                  </View>
-                  {a.draft ? (
-                    <View style={s.nanoWrote}>
-                      <Text style={[s.panelLabel, { color: "rgba(199,184,255,0.9)" }]}>NANO WROTE BACK</Text>
-                      <Text style={[s.panelBody, { color: "rgba(244,242,250,0.84)" }]}>{a.draft.body}</Text>
-                    </View>
-                  ) : null}
-                  {a.gist ? <Text style={s.consequence}>{a.gist}</Text> : null}
-                  {a.draft && !sent ? (
-                    <>
-                      <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
-                        <Pressable style={s.sendBtn} disabled={busyDraft === a.draft.id}
-                                   onPress={() => draftAction(a.draft!.id, "send")}>
-                          <Text style={s.sendText}>{busyDraft === a.draft.id ? "\u2026" : "Send it"}</Text>
-                        </Pressable>
-                        <Pressable style={s.ghostBtn} onPress={() => dismissDraft(a.draft!.id)}>
-                          <Text style={s.ghostText}>Dismiss</Text>
-                        </Pressable>
-                        <Pressable style={s.ghostBtn} onPress={() => draftAction(a.draft!.id, "defer")}>
-                          <Text style={s.ghostText}>{a.draft.deferred ? "Held" : "6pm"}</Text>
-                        </Pressable>
-                      </View>
-                      {a.kind ? (
-                        <Pressable style={s.autoRow} onPress={() => toggleAutoReply(a.kind, autoOn)}>
-                          <Text style={s.autoDot}>{autoOn ? "\u25c9" : "\u25cb"}</Text>
-                          <Text style={s.autoText}>
-                            {autoOn ? `Stop auto-replying to ${a.kind}` : `Auto-reply to ${a.kind} from now on`}
-                          </Text>
-                        </Pressable>
-                      ) : null}
-                    </>
-                  ) : sent ? (
-                    <Text style={s.sentLabel}>Sent ✓ · it's in the ledger</Text>
-                  ) : null}
-                </View>
+        ) : (
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={s.scroll}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing} tintColor={C.lav}
+              onRefresh={async () => {
+                setRefreshing(true);
+                try {
+                  await fetch(`${apiUrl}/v1/screen/inbox/refresh`, { method: "POST", headers: auth });
+                } catch { /* state refresh below still runs */ }
+                await refresh();
+                setTimeout(refresh, 6000);
+                if (alive.current) setRefreshing(false);
+              }}
+            />
+          }
+        >
+          {state.reauth?.needed ? (
+            <View style={s.reauth}>
+              <Text style={s.reauthTitle}>Google signed Nano out</Text>
+              <Text style={s.reauthBody}>Mail stopped syncing. Reconnect and the backlog flows in.</Text>
+              {state.reauth.auth_url ? (
+                <Pressable style={s.reauthBtn} onPress={() => Linking.openURL(state.reauth!.auth_url!)}>
+                  <Text style={s.reauthBtnText}>Reconnect Gmail</Text>
+                </Pressable>
               ) : null}
             </View>
-          );
-        })}</View>}
+          ) : null}
 
-        <View style={s.sectionHead}>
-          <Text style={s.sectionTitle}>Worth knowing</Text>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <Text style={s.count}>{state.worth_knowing.length}</Text>
-            {state.worth_knowing.length ? (
-              <Pressable onPress={clearNotes} hitSlop={8}>
-                <Text style={s.clear}>CLEAR</Text>
-              </Pressable>
-            ) : null}
+          <View style={s.sectionHead}>
+            <Text style={s.sectionTitle}>Needs you</Text>
+            <Text style={s.count}>{openAsks.length}</Text>
           </View>
-        </View>
-        {state.worth_knowing.length ? (
-          <Text style={s.holdHint}>Press and hold any card to tell me what to do with it.</Text>
-        ) : null}
-        <View style={s.panel}>
-          {state.worth_knowing.length === 0 ? (
-            <Text style={s.empty}>Nothing worth flagging right now.</Text>
-          ) : state.worth_knowing.map((n: any, i) => {
-            const open = openNote === n.id;
-            const autoReplied = n.draft?.status === "sent";
-            return (
-              <SwipeRow key={n.id} onDismiss={() => settleNote(n.id)}>
-                <Pressable onPress={() => setOpenNote(open ? null : n.id)}
-                           onLongPress={() => noteActions(n)} delayLongPress={350}
-                           style={[s.noteRow, i > 0 && s.divider]}>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                      <Text style={s.noteFrom}>{n.from_name}</Text>
-                      {autoReplied ? (
-                        <View style={s.autoChip}><Text style={s.autoChipText}>AUTO-REPLIED</Text></View>
+          {asks.length === 0 ? (
+            <Text style={s.empty}>Nothing needs your words right now.</Text>
+          ) : (
+            <View style={{ gap: 10 }}>
+              {asks.map((a, i) => {
+                const sent = a.draft ? sentLocal.has(a.draft.id) || a.draft.status === "sent" : false;
+                const expanded = openMail === a.id || asks.length === 1;
+                const autoOn = a.kind
+                  ? state.auto_reply_kinds.some((k) => k.toLowerCase() === a.kind.toLowerCase())
+                  : false;
+                return (
+                  <View key={a.id} style={[s.card, a.why_now ? s.cardUrgent : null]}>
+                    <Pressable style={s.cardHead} onPress={() => setOpenMail(expanded ? null : a.id)}>
+                      <LinearGradient colors={TILES[i % TILES.length]}
+                                      start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.tile}>
+                        <Text style={s.tileText}>{initials(a.from_name)}</Text>
+                      </LinearGradient>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={s.from}>{a.from_name}</Text>
+                        <Text style={s.subject} numberOfLines={1}>{a.subject}</Text>
+                      </View>
+                      {a.why_now ? (
+                        <View style={s.chip}><Text style={s.chipText}>{a.why_now.toUpperCase().slice(0, 14)}</Text></View>
                       ) : null}
-                    </View>
-                    <Text style={s.noteGist}>{n.gist || n.subject}</Text>
-                    {open ? (
-                      <>
-                        <Text style={s.noteBody}>{n.body.trim().slice(0, 1200)}</Text>
-                        {autoReplied && n.draft?.body ? (
-                          <Text style={s.noteWhy}>
-                            WHAT I SENT BACK{"\n"}
-                            <Text style={s.noteWhyBody}>{n.draft.body}</Text>
+                    </Pressable>
+                    {expanded ? (
+                      <View style={{ paddingHorizontal: 15, paddingBottom: 15 }}>
+                        <View style={s.theyWrote}>
+                          <View style={{ flexDirection: "row", alignItems: "baseline" }}>
+                            <Text style={[s.panelLabel, { flex: 1 }]}>THEY WROTE</Text>
+                            <Text style={s.panelAt}>{hhmm(a.received_at)}</Text>
+                          </View>
+                          <Text style={s.panelBody} numberOfLines={openMail === a.id ? undefined : 6}>
+                            {a.body.trim()}
                           </Text>
-                        ) : null}
-                        <Text style={s.noteWhy}>
-                          WHY THIS SURFACED{"\n"}
-                          <Text style={s.noteWhyBody}>
-                            {n.why_now || "Real information, nothing to do — flagged so it doesn't slip past you."}
-                          </Text>
-                        </Text>
-                        <View style={s.muteRow}>
-                          {n.kind ? (
-                            <Pressable style={s.muteBtn} onPress={() => muteRule({ kind: n.kind })}>
-                              <Text style={s.muteText}>Stop showing {n.kind}</Text>
-                            </Pressable>
-                          ) : null}
-                          <Pressable style={s.muteBtnGhost}
-                                     onPress={() => muteRule({ sender: n.from_addr })}>
-                            <Text style={s.muteTextGhost}>Never from {n.from_name}</Text>
-                          </Pressable>
                         </View>
-                      </>
+                        <View style={s.connector}>
+                          <View style={s.connLine} />
+                          <Text style={{ color: "rgba(199,184,255,0.6)", fontSize: 11 }}>↓</Text>
+                        </View>
+                        {a.draft ? (
+                          <View style={s.nanoWrote}>
+                            <Text style={[s.panelLabel, { color: "rgba(199,184,255,0.9)" }]}>NANO WROTE BACK</Text>
+                            <Text style={[s.panelBody, { color: "rgba(244,242,250,0.84)" }]}>{a.draft.body}</Text>
+                          </View>
+                        ) : null}
+                        {a.gist ? <Text style={s.consequence}>{a.gist}</Text> : null}
+                        {a.draft && !sent ? (
+                          <>
+                            <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+                              <Pressable style={s.sendBtn} disabled={busyDraft === a.draft.id}
+                                         onPress={() => draftAction(a.draft!.id, "send")}>
+                                <Text style={s.sendText}>{busyDraft === a.draft.id ? "…" : "Send it"}</Text>
+                              </Pressable>
+                              <Pressable style={s.ghostBtn} onPress={() => draftAction(a.draft!.id, "dismiss")}>
+                                <Text style={s.ghostText}>Dismiss</Text>
+                              </Pressable>
+                              <Pressable style={[s.ghostBtn, { borderColor: "rgba(255,255,255,0.12)" }]}
+                                         onPress={() => draftAction(a.draft!.id, "defer")}>
+                                <Text style={[s.ghostText, { color: "rgba(244,242,250,0.6)" }]}>
+                                  {a.draft.deferred ? "Held" : "6pm"}
+                                </Text>
+                              </Pressable>
+                            </View>
+                            {a.kind ? (
+                              <Pressable style={s.autoRow} onPress={() => toggleAutoReply(a.kind, autoOn)}>
+                                <Text style={{ color: "rgba(199,184,255,0.85)", fontSize: 12 }}>{"«"}</Text>
+                                <Text style={s.autoText}>
+                                  {autoOn ? `Stop auto-replying to ${a.kind}` : `Auto-reply to ${a.kind} from now on`}
+                                </Text>
+                              </Pressable>
+                            ) : null}
+                          </>
+                        ) : sent ? (
+                          <Text style={s.sentLabel}>Sent ✓ · it's in the ledger</Text>
+                        ) : null}
+                      </View>
                     ) : null}
                   </View>
-                  <Text style={s.disclose}>{open ? "–" : "+"}</Text>
-                </Pressable>
-              </SwipeRow>
-            );
-          })}
-        </View>
-
-        <Pressable style={[s.panel, { marginTop: 24 }]} onPress={() => setHandledOpen(!handledOpen)}>
-          <View style={s.handledHead}>
-            <Text style={s.handledTitle}>
-              <Text style={{ color: C.mint }}>{state.handled_count}</Text> handled without you
-            </Text>
-            <Text style={s.disclose}>{handledOpen ? "–" : "+"}</Text>
-          </View>
-          {handledOpen ? (
-            <>
-              {state.handled_categories.map((c, i) => (
-                <View key={c.name} style={[s.noteRow, s.divider]}>
-                  <Text style={s.noteFrom}>{c.name}</Text>
-                  <Text style={s.catN}>{c.n}</Text>
-                </View>
-              ))}
-              <Text style={s.footer}>None of it was a decision. Undo anything and that kind asks first again.</Text>
-            </>
-          ) : (
-            <Text style={s.footer}>Promotions, newsletters, social pings. Tap to see the breakdown.</Text>
-          )}
-        </Pressable>
-
-        {state.sent.length ? (
-          <>
-            <View style={s.sectionHead}>
-              <Text style={s.sectionTitle}>Sent</Text>
-              <Text style={s.count}>{state.sent.length}</Text>
-            </View>
-            <View style={s.panel}>
-              {state.sent.map((x, i) => {
-                const key = `${x.sent_at}-${i}`;
-                const open = sentOpen === key;
-                return (
-                  <Pressable key={key} onPress={() => setSentOpen(open ? null : key)}
-                             style={[s.noteRow, i > 0 && s.divider]}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.noteFrom}>To {x.to_name || x.to_addr}</Text>
-                      <Text style={s.noteGist} numberOfLines={open ? undefined : 1}>
-                        {x.subject || x.body.slice(0, 70)}
-                      </Text>
-                      {open ? <Text style={s.noteBody}>{x.body}</Text> : null}
-                    </View>
-                    <Text style={s.at}>{hhmm(x.sent_at)}</Text>
-                  </Pressable>
                 );
               })}
             </View>
-          </>
-        ) : null}
-      </ScrollView>
+          )}
 
+          <View style={[s.sectionHead, { marginTop: 26 }]}>
+            <Text style={s.sectionTitle}>Worth knowing</Text>
+            {state.worth_knowing.length ? (
+              <Pressable onPress={clearNotes} hitSlop={8}>
+                <Text style={s.clear}>Clear</Text>
+              </Pressable>
+            ) : <Text style={s.count}>0</Text>}
+          </View>
+          {state.worth_knowing.length ? (
+            <Text style={s.holdHint}>PRESS AND HOLD ANY CARD TO TELL ME WHAT TO DO WITH IT</Text>
+          ) : null}
+          <View style={{ gap: 8 }}>
+            {autoNotes.map((n) => {
+              const open = openNote === n.id;
+              return (
+                <SwipeRow key={n.id} onDismiss={() => settleNote(n.id)}>
+                  <View style={s.autoNote}>
+                    <Pressable style={s.autoNoteHead}
+                               onPress={() => setOpenNote(open ? null : n.id)}
+                               onLongPress={() => noteActions(n)} delayLongPress={350}>
+                      <Text style={{ color: "rgba(124,247,196,0.8)", fontSize: 12, marginTop: 2 }}>{"«"}</Text>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+                          <Text style={[s.noteFrom, { flex: 1 }]}>{n.from_name}</Text>
+                          <Text style={s.autoStamp}>AUTO-REPLIED</Text>
+                        </View>
+                        <Text style={s.microLabel}>THEY ASKED</Text>
+                        <Text style={s.microBody} numberOfLines={2}>{n.gist || n.subject}</Text>
+                        <Text style={[s.microLabel, { color: "rgba(124,247,196,0.7)", marginTop: 9 }]}>I SENT</Text>
+                        <Text style={[s.microBody, { color: "rgba(244,242,250,0.82)" }]} numberOfLines={open ? undefined : 2}>
+                          {n.draft?.body ?? ""}
+                        </Text>
+                      </View>
+                    </Pressable>
+                    {open ? (
+                      <View style={{ paddingHorizontal: 14, paddingBottom: 14 }}>
+                        <View style={s.hairline} />
+                        <Text style={s.microLabel}>WHAT WENT OUT</Text>
+                        <Text style={s.wentOut}>{n.draft?.body ?? ""}</Text>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 7, marginTop: 10 }}>
+                          <View style={s.nanoDot} />
+                          <Text style={s.byNano}>WRITTEN BY NANO</Text>
+                        </View>
+                        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 7, marginTop: 13 }}>
+                          {n.kind ? (
+                            <Pressable style={s.stopPill} onPress={() => toggleAutoReply(n.kind, true)}>
+                              <Text style={s.stopPillText}>Stop auto-replying to {n.kind}</Text>
+                            </Pressable>
+                          ) : null}
+                          <Pressable style={s.settingsPill} onPress={autoReplySettings}>
+                            <Text style={s.settingsPillText}>Auto-reply settings</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    ) : null}
+                  </View>
+                </SwipeRow>
+              );
+            })}
+            {plainNotes.map((n) => {
+              const open = openNote === n.id;
+              return (
+                <SwipeRow key={n.id} onDismiss={() => settleNote(n.id)}>
+                  <Pressable style={s.note}
+                             onPress={() => setOpenNote(open ? null : n.id)}
+                             onLongPress={() => noteActions(n)} delayLongPress={350}>
+                    <View style={s.noteDot} />
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={s.noteFrom}>{n.from_name}</Text>
+                      <Text style={s.noteGist} numberOfLines={open ? undefined : 2}>{n.gist || n.subject}</Text>
+                      {open ? (
+                        <>
+                          <Text style={s.noteBody}>{n.body.trim().slice(0, 1200)}</Text>
+                          <Text style={[s.microLabel, { marginTop: 12 }]}>WHY THIS SURFACED</Text>
+                          <Text style={s.microBody}>
+                            {n.why_now || "Real information, nothing to do — flagged so it doesn't slip past you."}
+                          </Text>
+                        </>
+                      ) : null}
+                    </View>
+                  </Pressable>
+                </SwipeRow>
+              );
+            })}
+            {!state.worth_knowing.length ? (
+              <Text style={s.empty}>Nothing worth flagging right now.</Text>
+            ) : null}
+          </View>
+
+          <Pressable style={s.handled} onPress={() => setHandledOpen(!handledOpen)}>
+            <Text style={{ color: C.mint, fontSize: 14 }}>✓</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={s.handledTitle}>{state.handled_count} handled without you</Text>
+              <Text style={s.handledSub}>Promotions, newsletters, receipts. None of it was a decision.</Text>
+            </View>
+            <Text style={s.handledToggle}>{handledOpen ? "HIDE" : "SHOW"}</Text>
+          </Pressable>
+          {handledOpen ? (
+            <View style={{ gap: 7, marginTop: 9 }}>
+              <View style={s.whereRow}>
+                <Text style={s.whereLabel}>WHERE IT WENT</Text>
+                <View style={s.whereLine} />
+                <Text style={[s.whereLabel, { color: "rgba(244,242,250,0.35)" }]}>GMAIL</Text>
+              </View>
+              {state.handled_categories.map((c) => (
+                <View key={c.name} style={s.catRow}>
+                  <View style={[s.catChip, { backgroundColor: CAT_COLORS[c.name] ?? "#6B6880" }]} />
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={s.catName}>{c.name}</Text>
+                    <Text style={s.catSub}>{c.n}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : null}
+        </ScrollView>
+        )}
+      </LinearGradient>
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: C.bg },
-  scroll: { padding: 20, paddingBottom: 140 },
-  backLink: { fontFamily: SANS_SEMI, fontSize: 13, color: C.muted, marginBottom: 14 },
-  headRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  title: { fontFamily: SERIF, fontSize: 38, color: C.text },
-  sub: { fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: C.muted, marginTop: 4 },
-  liveChip: { borderWidth: 1, borderColor: "rgba(124,247,196,0.4)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  liveText: { fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: C.mint },
-  centerBall: { position: "absolute", bottom: 26, alignSelf: "center" },
-  centerBallInner: {
-    width: 54, height: 54, borderRadius: 27,
-    shadowColor: "#C7B8FF", shadowOpacity: 0.8, shadowRadius: 18,
-    shadowOffset: { width: 0, height: 0 },
+  backdrop: { flex: 1, backgroundColor: "rgba(5,5,10,0.55)" },
+  sheet: {
+    position: "absolute", left: 0, right: 0, bottom: 0, top: 44,
+    borderTopLeftRadius: 34, borderTopRightRadius: 34, overflow: "hidden",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
   },
-  muteRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
-  muteBtn: {
-    borderRadius: 999, backgroundColor: "rgba(199,184,255,0.1)",
-    borderWidth: 1, borderColor: "rgba(199,184,255,0.3)",
-    paddingHorizontal: 12, paddingVertical: 7,
+  handle: {
+    width: 38, height: 4, borderRadius: 100, alignSelf: "center",
+    backgroundColor: "rgba(255,255,255,0.25)", marginTop: 10, marginBottom: 14,
   },
-  muteText: { fontFamily: SANS_SEMI, fontSize: 12, color: C.lav },
-  muteBtnGhost: {
-    borderRadius: 999, borderWidth: 1, borderColor: C.border,
-    paddingHorizontal: 12, paddingVertical: 7,
+  header: { flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 20 },
+  headTile: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  headTileText: { fontFamily: SANS_SEMI, fontSize: 15, color: "#FFFFFF" },
+  headName: { fontFamily: SANS_SEMI, fontSize: 16, color: C.text },
+  headSub: { fontFamily: SANS, fontSize: 11.5, color: "rgba(244,242,250,0.5)", marginTop: 2 },
+  scroll: { paddingHorizontal: 20, paddingTop: 18, paddingBottom: 140 },
+  reauth: {
+    borderRadius: 18, borderWidth: 1, borderColor: "rgba(255,157,168,0.45)",
+    backgroundColor: "rgba(255,157,168,0.07)", padding: 15, marginBottom: 20,
   },
-  muteTextGhost: { fontFamily: SANS_SEMI, fontSize: 12, color: C.muted },
-  holdHint: { fontFamily: MONO, fontSize: 9.5, letterSpacing: 1.2, textTransform: "uppercase", color: "rgba(244,242,250,0.38)", marginTop: -4, marginBottom: 11 },
-  autoRow: {
-    flexDirection: "row", alignItems: "center", gap: 8, marginTop: 13,
-    paddingTop: 12, borderTopWidth: 1, borderTopColor: "rgba(199,184,255,0.08)",
+  reauthTitle: { fontFamily: SANS_SEMI, fontSize: 14, color: C.rose },
+  reauthBody: { fontFamily: SANS, fontSize: 12.5, lineHeight: 18, color: "rgba(244,242,250,0.7)", marginTop: 5 },
+  reauthBtn: {
+    alignSelf: "flex-start", marginTop: 11, backgroundColor: C.lav,
+    borderRadius: 100, paddingHorizontal: 16, paddingVertical: 10,
   },
-  autoDot: { color: C.lav, fontSize: 13 },
-  autoText: { fontFamily: SANS_SEMI, fontSize: 12.5, color: C.body },
-  autoChip: {
-    borderRadius: 999, borderWidth: 1, borderColor: "rgba(124,247,196,0.4)",
-    backgroundColor: "rgba(124,247,196,0.07)", paddingHorizontal: 7, paddingVertical: 2,
-  },
-  autoChipText: { fontFamily: MONO, fontSize: 8, letterSpacing: 1, color: C.mint },
-  reauthBanner: { borderRadius: 18, borderWidth: 1, borderColor: "rgba(255,157,168,0.45)", backgroundColor: "rgba(255,157,168,0.07)", padding: 16, marginTop: 22 },
-  reauthTitle: { fontFamily: SANS_SEMI, fontSize: 15, color: C.rose },
-  reauthBody: { fontFamily: SANS, fontSize: 13, lineHeight: 19, color: C.body, marginTop: 6 },
-  sectionHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 26, marginBottom: 11 },
+  reauthBtnText: { fontFamily: SANS_SEMI, fontSize: 12.5, color: "#14101F" },
+  sectionHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 11 },
   sectionTitle: { fontFamily: SANS_SEMI, fontSize: 16, color: C.text },
   count: { fontFamily: MONO, fontSize: 10.5, letterSpacing: 1.5, color: "rgba(244,242,250,0.62)" },
   clear: { fontFamily: SANS, fontSize: 12, color: C.lav },
-  empty: { fontFamily: SANS, fontSize: 13, color: C.muted, paddingVertical: 8 },
+  holdHint: {
+    fontFamily: MONO, fontSize: 9.5, letterSpacing: 1.2,
+    color: "rgba(244,242,250,0.38)", marginTop: -4, marginBottom: 11,
+  },
+  empty: { fontFamily: SANS, fontSize: 13, color: C.muted, paddingVertical: 6 },
   card: {
     borderRadius: 22, overflow: "hidden",
     backgroundColor: "rgba(255,255,255,0.05)",
@@ -552,36 +548,70 @@ const s = StyleSheet.create({
   connector: { flexDirection: "row", alignItems: "center", gap: 9, marginVertical: 10, marginLeft: 14 },
   connLine: { width: 1, height: 14, backgroundColor: "rgba(199,184,255,0.4)" },
   consequence: { fontFamily: SANS, fontSize: 11.5, lineHeight: 16.5, color: "rgba(244,242,250,0.5)", marginTop: 10 },
-  sendBtn: {
-    flex: 1, alignItems: "center", padding: 12, borderRadius: 100, backgroundColor: C.lav,
-  },
+  sendBtn: { flex: 1, alignItems: "center", padding: 12, borderRadius: 100, backgroundColor: C.lav },
   sendText: { fontFamily: SANS_SEMI, fontSize: 12.5, color: "#14101F" },
   ghostBtn: {
     paddingHorizontal: 15, paddingVertical: 12, borderRadius: 100,
     backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
   },
   ghostText: { fontFamily: SANS_SEMI, fontSize: 12.5, color: "rgba(244,242,250,0.8)" },
-  primaryBtn: {
-    backgroundColor: C.lav, borderRadius: 999, paddingVertical: 11, paddingHorizontal: 20,
+  autoRow: {
+    flexDirection: "row", alignItems: "center", gap: 8, marginTop: 12,
+    paddingTop: 11, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.07)",
   },
-  primaryText: { fontFamily: SANS_SEMI, fontSize: 13.5, color: "#14101F" },
-  at: { fontFamily: MONO, fontSize: 10, color: C.muted },
-  sentLabel: { fontFamily: SANS, fontSize: 13, color: C.mint, marginTop: 12 },
-  panel: {},
-  noteRow: {
+  autoText: { flex: 1, fontFamily: SANS, fontSize: 11.5, lineHeight: 16, color: "rgba(199,184,255,0.85)" },
+  sentLabel: { fontFamily: SANS_SEMI, fontSize: 11.5, color: C.mint, paddingBottom: 2, paddingTop: 10 },
+  autoNote: {
+    borderRadius: 18, backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 1, borderColor: "rgba(124,247,196,0.18)",
+  },
+  autoNoteHead: { flexDirection: "row", alignItems: "flex-start", gap: 11, paddingHorizontal: 14, paddingVertical: 13 },
+  autoStamp: { fontFamily: MONO, fontSize: 9.5, letterSpacing: 0.8, color: "rgba(124,247,196,0.85)" },
+  microLabel: { fontFamily: MONO, fontSize: 9.5, letterSpacing: 1.6, color: "rgba(244,242,250,0.42)", marginTop: 8 },
+  microBody: { fontFamily: SANS, fontSize: 12, lineHeight: 17.5, color: "rgba(244,242,250,0.6)", marginTop: 3 },
+  hairline: { height: 1, backgroundColor: "rgba(255,255,255,0.08)", marginBottom: 12 },
+  wentOut: {
+    fontFamily: SERIF, fontStyle: "italic", fontSize: 14.5, lineHeight: 21.5,
+    color: "rgba(244,242,250,0.82)", marginTop: 7,
+  },
+  nanoDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: "rgba(199,184,255,0.6)" },
+  byNano: { fontFamily: MONO, fontSize: 10, letterSpacing: 1.8, color: "rgba(199,184,255,0.8)" },
+  stopPill: {
+    paddingHorizontal: 13, paddingVertical: 9, borderRadius: 100,
+    backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+  },
+  stopPillText: { fontFamily: SANS_SEMI, fontSize: 11.5, color: "rgba(244,242,250,0.82)" },
+  settingsPill: {
+    paddingHorizontal: 13, paddingVertical: 9, borderRadius: 100,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+  },
+  settingsPillText: { fontFamily: SANS_SEMI, fontSize: 11.5, color: "rgba(244,242,250,0.6)" },
+  note: {
     flexDirection: "row", alignItems: "flex-start", gap: 11,
-    paddingHorizontal: 14, paddingVertical: 13, borderRadius: 16, marginTop: 8,
+    paddingHorizontal: 14, paddingVertical: 13, borderRadius: 18,
     backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
   },
-  divider: {},
+  noteDot: { width: 7, height: 7, borderRadius: 4, marginTop: 5, backgroundColor: C.lav },
   noteFrom: { fontFamily: SANS_SEMI, fontSize: 12.5, color: C.text },
-  noteGist: { fontFamily: SANS, fontSize: 11.5, lineHeight: 16.5, color: "rgba(244,242,250,0.6)", marginTop: 3 },
-  noteBody: { fontFamily: SANS, fontSize: 13, lineHeight: 19.5, color: C.muted, marginTop: 10 },
-  noteWhy: { fontFamily: MONO, fontSize: 9, letterSpacing: 2, color: C.lav, marginTop: 12 },
-  noteWhyBody: { fontFamily: SANS, fontSize: 12.5, letterSpacing: 0, lineHeight: 18, color: C.muted },
-  disclose: { fontFamily: SANS, fontSize: 18, color: C.muted, marginTop: 2 },
-  handledHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 8 },
-  handledTitle: { fontFamily: SERIF, fontSize: 20, color: C.text },
-  catN: { fontFamily: MONO, fontSize: 11, color: C.mint, marginTop: 3 },
-  footer: { fontFamily: SANS, fontSize: 12.5, lineHeight: 18, color: C.muted, paddingBottom: 10 },
+  noteGist: { fontFamily: SANS, fontSize: 12, lineHeight: 17.5, color: "rgba(244,242,250,0.6)", marginTop: 3 },
+  noteBody: { fontFamily: SANS, fontSize: 12, lineHeight: 18, color: "rgba(244,242,250,0.55)", marginTop: 10 },
+  handled: {
+    flexDirection: "row", alignItems: "center", gap: 11, marginTop: 22,
+    paddingHorizontal: 15, paddingVertical: 14, borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.035)", borderWidth: 1, borderColor: "rgba(255,255,255,0.07)",
+  },
+  handledTitle: { fontFamily: SANS, fontSize: 13, color: C.text },
+  handledSub: { fontFamily: SANS, fontSize: 11, color: "rgba(244,242,250,0.5)", marginTop: 2 },
+  handledToggle: { fontFamily: MONO, fontSize: 10.5, letterSpacing: 1, color: "rgba(244,242,250,0.62)" },
+  whereRow: { flexDirection: "row", alignItems: "center", gap: 9, marginHorizontal: 2 },
+  whereLabel: { fontFamily: MONO, fontSize: 10, letterSpacing: 1.6, color: "rgba(244,242,250,0.42)" },
+  whereLine: { flex: 1, height: 1, backgroundColor: "rgba(255,255,255,0.07)" },
+  catRow: {
+    flexDirection: "row", alignItems: "center", gap: 11,
+    paddingHorizontal: 14, paddingVertical: 11, borderRadius: 14,
+    backgroundColor: "rgba(255,255,255,0.025)", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)",
+  },
+  catChip: { width: 9, height: 9, borderRadius: 3 },
+  catName: { fontFamily: SANS_SEMI, fontSize: 12.5, color: C.text },
+  catSub: { fontFamily: SANS, fontSize: 10.5, color: "rgba(244,242,250,0.5)", marginTop: 2 },
 });
