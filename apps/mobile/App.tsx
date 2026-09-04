@@ -600,8 +600,7 @@ function App() {
 
       {screenName === "inbox" && !error ? (
         <View style={{ position: "absolute", top: 60, left: 0, right: 0, bottom: 0 }}>
-          <InboxScreen apiUrl={apiUrl} auth={AUTH} onBack={() => setScreenName("hub")}
-                       onOpenStage={() => setStageSignal((n) => n + 1)} />
+          <InboxScreen apiUrl={apiUrl} auth={AUTH} onBack={() => setScreenName("hub")} />
         </View>
       ) : null}
 
@@ -675,7 +674,7 @@ function App() {
         </View>
       )}
 
-      {screenName === "hub" || screenName === "profile" ? (
+      {screenName === "hub" || screenName === "profile" || screenName === "inbox" ? (
         <View style={styles.dockBar}>
           <Pressable style={styles.dockSide} onPress={() => setScreenName("hub")} hitSlop={10}>
             <Text style={[styles.dockLabel, screenName === "hub" && styles.dockActive]}>HUB</Text>

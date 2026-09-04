@@ -105,12 +105,10 @@ export function InboxScreen({
   apiUrl,
   auth,
   onBack,
-  onOpenStage,
 }: {
   apiUrl: string;
   auth: Record<string, string>;
   onBack: () => void;
-  onOpenStage: () => void;
 }) {
   const [state, setState] = useState<InboxState | null>(null);
   const [openNote, setOpenNote] = useState<string | null>(null);
@@ -403,11 +401,6 @@ export function InboxScreen({
         ) : null}
       </ScrollView>
 
-      <Pressable style={s.centerBall} onPress={onOpenStage}>
-        <LinearGradient colors={["#C7B8FF", "#6D5BD0", "#2A2050"]}
-                        start={{ x: 0.2, y: 0.1 }} end={{ x: 0.8, y: 1 }}
-                        style={s.centerBallInner} />
-      </Pressable>
     </View>
   );
 }
