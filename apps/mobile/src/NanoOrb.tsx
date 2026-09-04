@@ -30,6 +30,7 @@ export function NanoOrb({
   onActed,
   openSignal,
   stageSignal,
+  hideBall,
 }: {
   apiUrl: string;
   auth: Record<string, string>;
@@ -38,6 +39,7 @@ export function NanoOrb({
   onActed?: () => void;
   openSignal?: number;
   stageSignal?: number;
+  hideBall?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
@@ -429,6 +431,7 @@ export function NanoOrb({
         ) : null}
       </View>
     ) : null}
+    {hideBall ? null : (
     <View pointerEvents="box-none" style={[o.dock, { top: insets.top + 64 }]}>
       <Animated.View
         style={{
@@ -465,6 +468,7 @@ export function NanoOrb({
         </View>
       ) : null}
     </View>
+    )}
     </>
   );
 }

@@ -165,32 +165,6 @@ export function HubScreen({
         </View>
       ) : null}
 
-      {b.timeline ? (
-        <>
-          <View style={s.sectionHead}>
-            <Text style={s.sectionTitle}>Context</Text>
-            <Text style={s.sectionAside}>
-              {(b.timelineTitle ?? "").split("·")[1]?.trim().toUpperCase() ?? ""}
-            </Text>
-          </View>
-          <View style={s.panel}>
-            {b.timeline.items.map((it, i) => (
-              <View key={i} style={[s.tlItem, i > 0 && s.tlDivider]}>
-                <View style={[s.tlDot, { backgroundColor: TONE_DOT[it.tone ?? "did"] ?? C.lavender }]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={s.tlText}>{it.text}</Text>
-                  <Text style={[s.tlVerdict, { color: TONE_DOT[it.tone ?? "did"] ?? C.lavender }]}>
-                    {it.verdict.toUpperCase()}
-                  </Text>
-                </View>
-                <Text style={s.tlAt}>{it.at}</Text>
-              </View>
-            ))}
-            {b.timeline.footer ? <Text style={s.tlFooter}>{b.timeline.footer}</Text> : null}
-          </View>
-        </>
-      ) : null}
-
       <View style={s.sectionHead}>
         <Text style={s.sectionTitle}>Your Hub</Text>
       </View>

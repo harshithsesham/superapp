@@ -49,24 +49,36 @@ function SwipeRow({ children, onDismiss }: {
   const tx = useRef(new Animated.Value(0)).current;
   const pan = useRef(
     PanResponder.create({
+      // Grab early on a sideways move and never give the gesture back to
+      // the scroll view — that hand-off fight was the rigidity.
       onMoveShouldSetPanResponder: (_e, g) =>
-        Math.abs(g.dx) > 14 && Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
-      onPanResponderMove: (_e, g) => tx.setValue(g.dx),
+        Math.abs(g.dx) > 6 && Math.abs(g.dx) > Math.abs(g.dy),
+      onMoveShouldSetPanResponderCapture: (_e, g) =>
+        Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderMove: Animated.event([null, { dx: tx }], { useNativeDriver: false }),
       onPanResponderRelease: (_e, g) => {
-        if (Math.abs(g.dx) > 90) {
+        // One committed swipe is enough: distance OR a flick of velocity.
+        if (Math.abs(g.dx) > 56 || Math.abs(g.vx) > 0.45) {
+          const dir = (g.dx || g.vx) > 0 ? 1 : -1;
           Animated.timing(tx, {
-            toValue: g.dx > 0 ? 420 : -420, duration: 180, useNativeDriver: true,
+            toValue: dir * 480, duration: 140, useNativeDriver: true,
           }).start(onDismiss);
         } else {
-          Animated.spring(tx, { toValue: 0, useNativeDriver: true }).start();
+          Animated.spring(tx, {
+            toValue: 0, friction: 8, tension: 60, useNativeDriver: true,
+          }).start();
         }
       },
       onPanResponderTerminate: () =>
         Animated.spring(tx, { toValue: 0, useNativeDriver: true }).start(),
     })
   ).current;
+  const opacity = tx.interpolate({
+    inputRange: [-220, 0, 220], outputRange: [0.15, 1, 0.15], extrapolate: "clamp",
+  });
   return (
-    <Animated.View style={{ transform: [{ translateX: tx }] }} {...pan.panHandlers}>
+    <Animated.View style={{ transform: [{ translateX: tx }], opacity }} {...pan.panHandlers}>
       {children}
     </Animated.View>
   );
