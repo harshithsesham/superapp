@@ -197,7 +197,7 @@ function AppCard({ letter, tone, name, sub, onPress }: {
 
 const s = StyleSheet.create({
   // The app's ScrollView already pads 16; add only a touch more breathing room.
-  root: { paddingHorizontal: 4, paddingBottom: 40 },
+  root: { paddingHorizontal: 4, paddingBottom: 130 },
   stamp: { fontFamily: MONO, fontSize: 11, letterSpacing: 3, color: C.muted, marginTop: 8 },
   greeting: { fontFamily: SERIF, fontSize: 42, lineHeight: 48, color: C.text },
   hint: { fontFamily: SANS, fontSize: 13, color: C.lavender, marginTop: 10 },

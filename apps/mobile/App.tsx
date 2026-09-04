@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import { LinearGradient } from "expo-linear-gradient";
 import { useFonts } from "expo-font";
 import { InstrumentSans_400Regular, InstrumentSans_600SemiBold } from "@expo-google-fonts/instrument-sans";
 import { InstrumentSerif_400Regular } from "@expo-google-fonts/instrument-serif";
@@ -33,6 +34,7 @@ import { CalScreen } from "./src/CalScreen";
 import { FlightsScreen } from "./src/FlightsScreen";
 import { HubScreen } from "./src/HubScreen";
 import { InboxScreen } from "./src/InboxScreen";
+import { ProfileScreen } from "./src/ProfileScreen";
 import { SduiScreen } from "./src/sdui/renderer";
 import { SDUI_VERSION } from "./src/sdui/types";
 import type { Screen } from "./src/sdui/types";
@@ -42,12 +44,14 @@ const extra = (Constants.expoConfig?.extra ?? {}) as { apiUrl?: string; apiToken
 // callback reads them at call time.
 let apiUrl = extra.apiUrl ?? "";
 let AUTH: { Authorization: string } = { Authorization: `Bearer ${extra.apiToken ?? ""}` };
+let USER_NAME = "";
 
 type StoredSession = { url: string; token: string; user?: string; name?: string };
 
 function applySession(sess: StoredSession) {
   apiUrl = sess.url;
   AUTH = { Authorization: `Bearer ${sess.token}` };
+  USER_NAME = sess.name || sess.user || "";
 }
 
 // Show Nano's pushes even when the app is foregrounded — without this, iOS
@@ -61,7 +65,7 @@ Notifications.setNotificationHandler({
   }),
 });
 
-const SCREENS = ["hub", "inbox", "home", "finance", "stylist", "flights"] as const;
+const SCREENS = ["hub", "inbox", "home", "finance", "stylist", "flights", "profile"] as const;
 type ScreenName = (typeof SCREENS)[number];
 
 // A crash must never be a black screen: show the error and offer a retry.
@@ -547,11 +551,7 @@ function App() {
           </Pressable>
         </View>
       ) : (
-        <View style={[styles.tabs, { justifyContent: "flex-end" }]}>
-          <Pressable style={[styles.tab, dark && styles.tabDark]} onPress={signOut}>
-            <Text style={[styles.backText, dark && styles.backTextDark]}>SIGN OUT</Text>
-          </Pressable>
-        </View>
+        <View style={styles.tabs} />
       )}
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -576,7 +576,7 @@ function App() {
       >
         {error ? (
           <Text style={styles.error}>{error}</Text>
-        ) : screenName === "home" || screenName === "flights" || screenName === "inbox" ? null : screen ? (
+        ) : screenName === "home" || screenName === "flights" || screenName === "inbox" || screenName === "profile" ? null : screen ? (
           screenName === "hub" ? (
             <HubScreen
               screen={screen}
@@ -602,6 +602,17 @@ function App() {
         <View style={{ position: "absolute", top: 60, left: 0, right: 0, bottom: 0 }}>
           <InboxScreen apiUrl={apiUrl} auth={AUTH} onBack={() => setScreenName("hub")}
                        onOpenStage={() => setStageSignal((n) => n + 1)} />
+        </View>
+      ) : null}
+
+      {screenName === "profile" && !error ? (
+        <View style={{ position: "absolute", top: 60, left: 0, right: 0, bottom: 0 }}>
+          <ProfileScreen
+            apiUrl={apiUrl}
+            auth={AUTH}
+            userName={USER_NAME || (screen?.title?.match(/, (.+)\.$/)?.[1] ?? "")}
+            onSignOut={signOut}
+          />
         </View>
       ) : null}
 
@@ -664,12 +675,28 @@ function App() {
         </View>
       )}
 
+      {screenName === "hub" || screenName === "profile" ? (
+        <View style={styles.dockBar}>
+          <Pressable style={styles.dockSide} onPress={() => setScreenName("hub")} hitSlop={10}>
+            <Text style={[styles.dockLabel, screenName === "hub" && styles.dockActive]}>HUB</Text>
+          </Pressable>
+          <Pressable onPress={() => setStageSignal((n) => n + 1)} hitSlop={12} style={styles.dockBallWrap}>
+            <LinearGradient colors={["#C7B8FF", "#6D5BD0", "#2A2050"]}
+                            start={{ x: 0.2, y: 0.1 }} end={{ x: 0.8, y: 1 }}
+                            style={styles.dockBall} />
+          </Pressable>
+          <Pressable style={styles.dockSide} onPress={() => setScreenName("profile")} hitSlop={10}>
+            <Text style={[styles.dockLabel, screenName === "profile" && styles.dockActive]}>PROFILE</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <NanoOrb
         apiUrl={apiUrl}
         auth={AUTH}
         openSignal={orbSignal}
         stageSignal={stageSignal}
-        hideBall={screenName === "inbox"}
+        hideBall={screenName === "inbox" || screenName === "hub" || screenName === "profile"}
         onNavigate={onNavigate}
         onRefreshInbox={() => {
           setScreenName("inbox");
@@ -815,6 +842,27 @@ const si = StyleSheet.create({
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#F7F7F5" },
   rootDark: { backgroundColor: "#08070E" },
+  dockBar: {
+    position: "absolute", left: 0, right: 0, bottom: 0,
+    flexDirection: "row", alignItems: "center",
+    paddingBottom: 28, paddingTop: 12, paddingHorizontal: 36,
+    backgroundColor: "rgba(6,5,12,0.97)",
+    borderTopWidth: 1, borderTopColor: "rgba(199,184,255,0.12)",
+    zIndex: 40,
+  },
+  dockSide: { flex: 1, alignItems: "center" },
+  dockLabel: {
+    fontFamily: "JetBrainsMono_400Regular", fontSize: 10,
+    letterSpacing: 3, color: "#8A87A3",
+  },
+  dockActive: { color: "#C7B8FF" },
+  dockBallWrap: { marginTop: -26 },
+  dockBall: {
+    width: 56, height: 56, borderRadius: 28,
+    shadowColor: "#9F8CFF", shadowOpacity: 0.9, shadowRadius: 18,
+    shadowOffset: { width: 0, height: 0 },
+    borderWidth: 1, borderColor: "rgba(199,184,255,0.4)",
+  },
   tabs: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingTop: 8 },
   tab: { paddingVertical: 6, paddingHorizontal: 14, borderRadius: 16, backgroundColor: "#ECECEA" },
   tabActive: { backgroundColor: "#1A1A1A" },
