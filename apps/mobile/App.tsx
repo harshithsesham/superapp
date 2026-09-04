@@ -36,6 +36,8 @@ import { FlightsScreen } from "./src/FlightsScreen";
 import { HubScreen } from "./src/HubScreen";
 import { InboxScreen } from "./src/InboxScreen";
 import { ProfileScreen } from "./src/ProfileScreen";
+import { BriefPlayer } from "./src/BriefPlayer";
+import Svg, { Path, Rect } from "react-native-svg";
 import { SduiScreen } from "./src/sdui/renderer";
 import { SDUI_VERSION } from "./src/sdui/types";
 import type { Screen } from "./src/sdui/types";
@@ -343,6 +345,7 @@ function App() {
 
   const [orbSignal, setOrbSignal] = useState(0);
   const [stageSignal, setStageSignal] = useState(0);
+  const [briefPlaying, setBriefPlaying] = useState(false);
 
   const onFixMeal = useCallback((mealId: string) => {
     Alert.prompt(
@@ -599,7 +602,7 @@ function App() {
               screen={screen}
               onNavigate={onNavigate}
               onReaction={onReaction}
-              onPlayBrief={() => setStageSignal((n) => n + 1)}
+              onPlayBrief={() => setBriefPlaying(true)}
             />
           ) : (
             <SduiScreen
@@ -695,7 +698,13 @@ function App() {
       {screenName === "hub" || screenName === "profile" || screenName === "inbox" ? (
         <View style={styles.dockBar}>
           <Pressable style={styles.dockSide} onPress={() => setScreenName("hub")} hitSlop={10}>
-            <Text style={[styles.dockLabel, screenName === "hub" && styles.dockActive]}>HUB</Text>
+            <Svg width={20} height={20} viewBox="0 0 20 20">
+              {[0, 11].flatMap((x) => [0, 11].map((y) => (
+                <Rect key={`${x}-${y}`} x={x} y={y} width={9} height={9} rx={2.6}
+                      fill="none" strokeWidth={1.7}
+                      stroke={screenName === "hub" ? "#C7B8FF" : "#8A87A3"} />
+              )))}
+            </Svg>
           </Pressable>
           <Pressable onPress={() => setStageSignal((n) => n + 1)} hitSlop={12} style={styles.dockBallWrap}>
             <LinearGradient colors={["#C7B8FF", "#6D5BD0", "#2A2050"]}
@@ -703,9 +712,22 @@ function App() {
                             style={styles.dockBall} />
           </Pressable>
           <Pressable style={styles.dockSide} onPress={() => setScreenName("profile")} hitSlop={10}>
-            <Text style={[styles.dockLabel, screenName === "profile" && styles.dockActive]}>PROFILE</Text>
+            <Svg width={20} height={20} viewBox="0 0 24 24">
+              <Path d="M12 12a4 4 0 100-8 4 4 0 000 8zm-7 8a7 7 0 0114 0"
+                    fill="none" strokeWidth={1.8} strokeLinecap="round"
+                    stroke={screenName === "profile" ? "#C7B8FF" : "#8A87A3"} />
+            </Svg>
           </Pressable>
         </View>
+      ) : null}
+
+      {briefPlaying ? (
+        <BriefPlayer
+          apiUrl={apiUrl}
+          auth={AUTH}
+          onClose={() => setBriefPlaying(false)}
+          onOpenInbox={() => setScreenName("inbox")}
+        />
       ) : null}
 
       <NanoOrb

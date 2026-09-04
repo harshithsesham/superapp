@@ -25,7 +25,7 @@ const C = {
   body: "#C9C5DA", lav: "#C7B8FF", mint: "#7CF7C4", rose: "#FF9DA8",
   onAccent: "#14101F",
 };
-const MONO = "Menlo";
+const MONO = "JetBrainsMono_400Regular";
 const SERIF = "InstrumentSerif_400Regular";
 const SANS = "InstrumentSans_400Regular";
 const SANS_SEMI = "InstrumentSans_600SemiBold";
@@ -275,79 +275,80 @@ export function InboxScreen({
         </View>
         {asks.length === 0 ? (
           <Text style={s.empty}>Nothing needs your words right now.</Text>
-        ) : asks.map((a, i) => {
+        ) : <View style={{ gap: 8 }}>{asks.map((a, i) => {
           const sent = a.draft ? sentLocal.has(a.draft.id) || a.draft.status === "sent" : false;
-          const expanded = openMail === a.id;
+          const expanded = openMail === a.id || asks.length === 1;
+          const autoOn = a.kind
+            ? state.auto_reply_kinds.some((k) => k.toLowerCase() === a.kind.toLowerCase())
+            : false;
           return (
-            <View key={a.id} style={s.card}>
-              <View style={s.cardHead}>
+            <View key={a.id} style={[s.card, a.why_now ? s.cardUrgent : null]}>
+              <Pressable style={s.cardHead} onPress={() => setOpenMail(expanded ? null : a.id)}>
                 <LinearGradient colors={TILES[i % TILES.length]}
                                 start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.tile}>
                   <Text style={s.tileText}>{initials(a.from_name)}</Text>
                 </LinearGradient>
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={s.from}>{a.from_name}</Text>
                   <Text style={s.subject} numberOfLines={1}>{a.subject}</Text>
                 </View>
-                <View style={{ alignItems: "flex-end", gap: 4 }}>
-                  {a.why_now ? (
-                    <View style={s.chip}><Text style={s.chipText}>{a.why_now.toUpperCase().slice(0, 18)}</Text></View>
-                  ) : null}
-                  <Text style={s.at}>{hhmm(a.received_at)}</Text>
-                </View>
-              </View>
-              <Pressable onPress={() => setOpenMail(expanded ? null : a.id)}>
-                <Text style={s.quote} numberOfLines={expanded ? undefined : 3}>
-                  “{a.body.trim()}”
-                </Text>
-                {!expanded && a.body.length > 180 ? (
-                  <Text style={s.moreHint}>tap to read all</Text>
+                {a.why_now ? (
+                  <View style={s.chip}><Text style={s.chipText}>{a.why_now.toUpperCase().slice(0, 16)}</Text></View>
                 ) : null}
               </Pressable>
-              {a.draft ? (
-                <View style={s.draftBox}>
-                  <Text style={s.draftLabel}>YOUR REPLY · WRITTEN</Text>
-                  <Text style={s.draftText}>“{a.draft.body}”</Text>
-                </View>
-              ) : null}
-              {a.gist ? <Text style={s.consequence}>{a.gist}</Text> : null}
-              {a.draft && !sent ? (
-                <>
-                  <View style={s.actions}>
-                    <Pressable style={s.primaryBtn} disabled={busyDraft === a.draft.id}
-                               onPress={() => draftAction(a.draft!.id, "send")}>
-                      <Text style={s.primaryText}>{busyDraft === a.draft.id ? "…" : "Send it"}</Text>
-                    </Pressable>
-                    <Pressable style={s.ghostBtn} onPress={() => dismissDraft(a.draft!.id)}>
-                      <Text style={s.ghostText}>Dismiss</Text>
-                    </Pressable>
-                    <Pressable style={s.ghostBtn} onPress={() => draftAction(a.draft!.id, "defer")}>
-                      <Text style={s.ghostText}>{a.draft.deferred ? "Held" : "6pm"}</Text>
-                    </Pressable>
+              {expanded ? (
+                <View style={{ paddingHorizontal: 15, paddingBottom: 15 }}>
+                  <View style={s.theyWrote}>
+                    <View style={{ flexDirection: "row", alignItems: "baseline" }}>
+                      <Text style={[s.panelLabel, { flex: 1 }]}>THEY WROTE</Text>
+                      <Text style={s.panelAt}>{hhmm(a.received_at)}</Text>
+                    </View>
+                    <Text style={s.panelBody} numberOfLines={openMail === a.id ? undefined : 6}>
+                      {a.body.trim()}
+                    </Text>
                   </View>
-                  {a.kind ? (
-                    <Pressable
-                      style={s.autoRow}
-                      onPress={() => toggleAutoReply(a.kind,
-                        state.auto_reply_kinds.some((k) => k.toLowerCase() === a.kind.toLowerCase()))}
-                    >
-                      <Text style={s.autoDot}>
-                        {state.auto_reply_kinds.some((k) => k.toLowerCase() === a.kind.toLowerCase()) ? "◉" : "○"}
-                      </Text>
-                      <Text style={s.autoText}>
-                        {state.auto_reply_kinds.some((k) => k.toLowerCase() === a.kind.toLowerCase())
-                          ? `Stop auto-replying to ${a.kind}`
-                          : `Auto-reply to ${a.kind} from now on`}
-                      </Text>
-                    </Pressable>
+                  <View style={s.connector}>
+                    <View style={s.connLine} />
+                    <Text style={{ color: "rgba(199,184,255,0.6)", fontSize: 11 }}>{"\u2193"}</Text>
+                  </View>
+                  {a.draft ? (
+                    <View style={s.nanoWrote}>
+                      <Text style={[s.panelLabel, { color: "rgba(199,184,255,0.9)" }]}>NANO WROTE BACK</Text>
+                      <Text style={[s.panelBody, { color: "rgba(244,242,250,0.84)" }]}>{a.draft.body}</Text>
+                    </View>
                   ) : null}
-                </>
-              ) : sent ? (
-                <Text style={s.sentLabel}>Sent ✓ · it's in the ledger</Text>
+                  {a.gist ? <Text style={s.consequence}>{a.gist}</Text> : null}
+                  {a.draft && !sent ? (
+                    <>
+                      <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+                        <Pressable style={s.sendBtn} disabled={busyDraft === a.draft.id}
+                                   onPress={() => draftAction(a.draft!.id, "send")}>
+                          <Text style={s.sendText}>{busyDraft === a.draft.id ? "\u2026" : "Send it"}</Text>
+                        </Pressable>
+                        <Pressable style={s.ghostBtn} onPress={() => dismissDraft(a.draft!.id)}>
+                          <Text style={s.ghostText}>Dismiss</Text>
+                        </Pressable>
+                        <Pressable style={s.ghostBtn} onPress={() => draftAction(a.draft!.id, "defer")}>
+                          <Text style={s.ghostText}>{a.draft.deferred ? "Held" : "6pm"}</Text>
+                        </Pressable>
+                      </View>
+                      {a.kind ? (
+                        <Pressable style={s.autoRow} onPress={() => toggleAutoReply(a.kind, autoOn)}>
+                          <Text style={s.autoDot}>{autoOn ? "\u25c9" : "\u25cb"}</Text>
+                          <Text style={s.autoText}>
+                            {autoOn ? `Stop auto-replying to ${a.kind}` : `Auto-reply to ${a.kind} from now on`}
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                    </>
+                  ) : sent ? (
+                    <Text style={s.sentLabel}>Sent ✓ · it's in the ledger</Text>
+                  ) : null}
+                </View>
               ) : null}
             </View>
           );
-        })}
+        })}</View>}
 
         <View style={s.sectionHead}>
           <Text style={s.sectionTitle}>Worth knowing</Text>
@@ -500,7 +501,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 7,
   },
   muteTextGhost: { fontFamily: SANS_SEMI, fontSize: 12, color: C.muted },
-  holdHint: { fontFamily: SANS, fontSize: 12, color: C.muted, marginBottom: 8 },
+  holdHint: { fontFamily: MONO, fontSize: 9.5, letterSpacing: 1.2, textTransform: "uppercase", color: "rgba(244,242,250,0.38)", marginTop: -4, marginBottom: 11 },
   autoRow: {
     flexDirection: "row", alignItems: "center", gap: 8, marginTop: 13,
     paddingTop: 12, borderTopWidth: 1, borderTopColor: "rgba(199,184,255,0.08)",
@@ -515,37 +516,66 @@ const s = StyleSheet.create({
   reauthBanner: { borderRadius: 18, borderWidth: 1, borderColor: "rgba(255,157,168,0.45)", backgroundColor: "rgba(255,157,168,0.07)", padding: 16, marginTop: 22 },
   reauthTitle: { fontFamily: SANS_SEMI, fontSize: 15, color: C.rose },
   reauthBody: { fontFamily: SANS, fontSize: 13, lineHeight: 19, color: C.body, marginTop: 6 },
-  sectionHead: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", marginTop: 30, marginBottom: 10 },
-  sectionTitle: { fontFamily: SERIF, fontSize: 24, color: C.text },
-  count: { fontFamily: SERIF, fontSize: 18, color: C.lav },
-  clear: { fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: C.muted },
+  sectionHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 26, marginBottom: 11 },
+  sectionTitle: { fontFamily: SANS_SEMI, fontSize: 16, color: C.text },
+  count: { fontFamily: MONO, fontSize: 10.5, letterSpacing: 1.5, color: "rgba(244,242,250,0.62)" },
+  clear: { fontFamily: SANS, fontSize: 12, color: C.lav },
   empty: { fontFamily: SANS, fontSize: 13, color: C.muted, paddingVertical: 8 },
-  card: { borderRadius: 20, borderWidth: 1, borderColor: C.border, backgroundColor: C.panel, padding: 16, marginBottom: 12 },
-  cardHead: { flexDirection: "row", alignItems: "center", gap: 12 },
-  tile: { width: 42, height: 42, borderRadius: 13, alignItems: "center", justifyContent: "center" },
-  tileText: { fontFamily: SANS_SEMI, fontSize: 15, color: "#FFFFFF" },
-  from: { fontFamily: SANS_SEMI, fontSize: 15, color: C.text },
-  subject: { fontFamily: SANS, fontSize: 12.5, color: C.muted, marginTop: 2 },
-  chip: { borderWidth: 1, borderColor: "rgba(255,157,168,0.45)", backgroundColor: "rgba(255,157,168,0.08)", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
-  chipText: { fontFamily: MONO, fontSize: 8.5, letterSpacing: 1, color: C.rose },
+  card: {
+    borderRadius: 22, overflow: "hidden",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.09)",
+  },
+  cardUrgent: { borderColor: "rgba(255,157,168,0.35)" },
+  cardHead: { flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 15, paddingVertical: 14 },
+  tile: { width: 32, height: 32, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  tileText: { fontFamily: SANS_SEMI, fontSize: 12, color: "#FFFFFF" },
+  from: { fontFamily: SANS_SEMI, fontSize: 13.5, color: C.text },
+  subject: { fontFamily: SANS, fontSize: 11.5, color: "rgba(244,242,250,0.55)", marginTop: 2 },
+  chip: {
+    borderWidth: 1, borderColor: "rgba(255,157,168,0.4)",
+    backgroundColor: "rgba(255,157,168,0.1)", borderRadius: 100,
+    paddingHorizontal: 10, paddingVertical: 5,
+  },
+  chipText: { fontFamily: MONO, fontSize: 10, letterSpacing: 0.8, color: C.rose },
+  theyWrote: {
+    padding: 13, borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.035)", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)",
+  },
+  nanoWrote: {
+    padding: 13, borderRadius: 16,
+    backgroundColor: "rgba(199,184,255,0.09)", borderWidth: 1, borderColor: "rgba(199,184,255,0.22)",
+  },
+  panelLabel: { fontFamily: MONO, fontSize: 10.5, letterSpacing: 1.8, color: "rgba(244,242,250,0.6)" },
+  panelAt: { fontFamily: MONO, fontSize: 10.5, color: "rgba(244,242,250,0.5)" },
+  panelBody: { fontFamily: SANS, fontSize: 12.5, lineHeight: 19.5, color: "rgba(244,242,250,0.72)", marginTop: 8 },
+  connector: { flexDirection: "row", alignItems: "center", gap: 9, marginVertical: 10, marginLeft: 14 },
+  connLine: { width: 1, height: 14, backgroundColor: "rgba(199,184,255,0.4)" },
+  consequence: { fontFamily: SANS, fontSize: 11.5, lineHeight: 16.5, color: "rgba(244,242,250,0.5)", marginTop: 10 },
+  sendBtn: {
+    flex: 1, alignItems: "center", padding: 12, borderRadius: 100, backgroundColor: C.lav,
+  },
+  sendText: { fontFamily: SANS_SEMI, fontSize: 12.5, color: "#14101F" },
+  ghostBtn: {
+    paddingHorizontal: 15, paddingVertical: 12, borderRadius: 100,
+    backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+  },
+  ghostText: { fontFamily: SANS_SEMI, fontSize: 12.5, color: "rgba(244,242,250,0.8)" },
+  primaryBtn: {
+    backgroundColor: C.lav, borderRadius: 999, paddingVertical: 11, paddingHorizontal: 20,
+  },
+  primaryText: { fontFamily: SANS_SEMI, fontSize: 13.5, color: "#14101F" },
   at: { fontFamily: MONO, fontSize: 10, color: C.muted },
-  quote: { fontFamily: SANS, fontSize: 14, lineHeight: 20.5, color: C.body, marginTop: 12 },
-  moreHint: { fontFamily: MONO, fontSize: 9, letterSpacing: 1, color: C.muted, marginTop: 4 },
-  draftBox: { borderRadius: 14, borderWidth: 1, borderColor: "rgba(199,184,255,0.22)", backgroundColor: "rgba(199,184,255,0.06)", padding: 12, marginTop: 12 },
-  draftLabel: { fontFamily: MONO, fontSize: 9, letterSpacing: 2, color: C.lav },
-  draftText: { fontFamily: SANS, fontSize: 14, lineHeight: 20.5, color: C.text, marginTop: 6 },
-  consequence: { fontFamily: SANS, fontSize: 12.5, lineHeight: 18, color: C.muted, marginTop: 10 },
-  actions: { flexDirection: "row", gap: 10, marginTop: 14 },
-  primaryBtn: { backgroundColor: C.lav, borderRadius: 999, paddingVertical: 11, paddingHorizontal: 20 },
-  primaryText: { fontFamily: SANS_SEMI, fontSize: 13.5, color: C.onAccent },
-  ghostBtn: { borderWidth: 1, borderColor: C.border, borderRadius: 999, paddingVertical: 11, paddingHorizontal: 16 },
-  ghostText: { fontFamily: SANS_SEMI, fontSize: 13, color: C.muted },
   sentLabel: { fontFamily: SANS, fontSize: 13, color: C.mint, marginTop: 12 },
-  panel: { borderRadius: 20, borderWidth: 1, borderColor: C.border, backgroundColor: C.panel, paddingHorizontal: 16, paddingVertical: 6 },
-  noteRow: { flexDirection: "row", alignItems: "flex-start", gap: 12, paddingVertical: 12 },
-  divider: { borderTopWidth: 1, borderTopColor: "rgba(199,184,255,0.08)" },
-  noteFrom: { fontFamily: SANS_SEMI, fontSize: 14, color: C.text },
-  noteGist: { fontFamily: SANS, fontSize: 13, lineHeight: 19, color: C.body, marginTop: 3 },
+  panel: {},
+  noteRow: {
+    flexDirection: "row", alignItems: "flex-start", gap: 11,
+    paddingHorizontal: 14, paddingVertical: 13, borderRadius: 16, marginTop: 8,
+    backgroundColor: "rgba(255,255,255,0.04)", borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
+  },
+  divider: {},
+  noteFrom: { fontFamily: SANS_SEMI, fontSize: 12.5, color: C.text },
+  noteGist: { fontFamily: SANS, fontSize: 11.5, lineHeight: 16.5, color: "rgba(244,242,250,0.6)", marginTop: 3 },
   noteBody: { fontFamily: SANS, fontSize: 13, lineHeight: 19.5, color: C.muted, marginTop: 10 },
   noteWhy: { fontFamily: MONO, fontSize: 9, letterSpacing: 2, color: C.lav, marginTop: 12 },
   noteWhyBody: { fontFamily: SANS, fontSize: 12.5, letterSpacing: 0, lineHeight: 18, color: C.muted },
