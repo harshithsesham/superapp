@@ -28,6 +28,7 @@ export function ProfileScreen({
   onSignOut: () => void;
 }) {
   const [people, setPeople] = useState<PersonRow[]>([]);
+  const [peopleOpen, setPeopleOpen] = useState(false);
   const [mail, setMail] = useState<{ connected: boolean; reauth: boolean } | null>(null);
   const alive = useRef(true);
 
@@ -83,7 +84,11 @@ export function ProfileScreen({
 
       {people.length ? (
         <>
-          <Text style={s.sectionTitle}>People Nano knows</Text>
+          <Pressable style={s.sectionRow} onPress={() => setPeopleOpen(!peopleOpen)}>
+            <Text style={s.sectionTitle}>People Nano knows</Text>
+            <Text style={s.disclose}>{peopleOpen ? "–" : `${people.length} +`}</Text>
+          </Pressable>
+          {peopleOpen ? (
           <View style={s.panel}>
             {people.map((p, i) => (
               <View key={p.email} style={[s.person, i > 0 && s.divider]}>
@@ -99,6 +104,7 @@ export function ProfileScreen({
               Profiles sharpen with every email in or out. Services never become people.
             </Text>
           </View>
+          ) : null}
         </>
       ) : null}
 
@@ -124,7 +130,12 @@ const s = StyleSheet.create({
   rowTitle: { fontFamily: SANS_SEMI, fontSize: 16, color: C.text },
   status: { fontFamily: MONO, fontSize: 10, letterSpacing: 2 },
   rowSub: { fontFamily: SANS, fontSize: 13, lineHeight: 19, color: C.muted, marginTop: 8 },
-  sectionTitle: { fontFamily: SERIF, fontSize: 24, color: C.text, marginTop: 30 },
+  sectionRow: {
+    flexDirection: "row", alignItems: "baseline",
+    justifyContent: "space-between", marginTop: 30,
+  },
+  sectionTitle: { fontFamily: SERIF, fontSize: 24, color: C.text },
+  disclose: { fontFamily: MONO, fontSize: 13, color: C.muted },
   person: { paddingVertical: 10 },
   divider: { borderTopWidth: 1, borderTopColor: "rgba(199,184,255,0.08)" },
   personName: { fontFamily: SANS_SEMI, fontSize: 15, color: C.text },

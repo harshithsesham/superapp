@@ -96,11 +96,14 @@ export function HubScreen({
   screen,
   onNavigate,
   onReaction,
+  onPlayBrief,
 }: {
   screen: SduiScreenT;
   onNavigate: (screen: string) => void;
   onReaction: (kind: string, targetId: string, agent?: string) => void;
+  onPlayBrief: () => void;
 }) {
+  const [briefOpen, setBriefOpen] = React.useState(false);
   const b = useMemo(() => pluck(screen), [screen]);
   const [line1, line2] = useMemo(() => {
     const t = screen.title ?? "";
@@ -119,10 +122,59 @@ export function HubScreen({
         }} />
       ))}
 
-      {b.stamp ? <Text style={s.stamp}>{b.stamp}</Text> : null}
+      <View style={s.topRow}>
+        {b.stamp ? <Text style={s.stamp}>{b.stamp}</Text> : <View />}
+        <Pressable onPress={() => onNavigate("profile")} hitSlop={10}>
+          <LinearGradient colors={["#C7B8FF", "#6D5BD0"]}
+                          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.avatarChip}>
+            <Text style={s.avatarChipText}>
+              {(line2 || line1 || "N").trim().slice(0, 1).toUpperCase()}
+            </Text>
+          </LinearGradient>
+        </Pressable>
+      </View>
       <Text style={s.greeting}>{line1}</Text>
       {line2 ? <Text style={s.greeting}>{line2}</Text> : null}
       {b.hint ? <Text style={s.hint}>{b.hint}</Text> : null}
+
+      {b.brief ? (
+        <Pressable style={s.briefing} onPress={() => setBriefOpen(!briefOpen)}>
+          <Text style={s.briefingTitle}>Morning briefing</Text>
+          <Text style={s.briefingSub} numberOfLines={briefOpen ? undefined : 2}>
+            {b.brief.body}
+          </Text>
+          <View style={s.briefingRow}>
+            <Pressable style={s.playBtn} onPress={onPlayBrief} hitSlop={8}>
+              <Text style={s.playText}>Play</Text>
+            </Pressable>
+            <Text style={s.playMeta}>YOUR DAY · SPOKEN</Text>
+          </View>
+          {briefOpen ? (
+            <View style={{ marginTop: 16, gap: 10 }}>
+              {[
+                b.inbox && {
+                  mono: "I", stamp: b.inbox.stats?.[0]
+                    ? `${b.inbox.stats[0].n} ${b.inbox.stats[0].label}` : "Inbox",
+                  head: b.inbox.headline, go: "inbox", cta: "Open the inbox",
+                },
+                ...(b.grid?.items ?? []).map((g) => ({
+                  mono: g.name[0], stamp: g.sub, head: g.name,
+                  go: g.screen, cta: `Open ${g.name}`,
+                })),
+              ].filter(Boolean).map((seg: any) => (
+                <Pressable key={seg.go} style={s.segment} onPress={() => onNavigate(seg.go)}>
+                  <View style={s.segTile}><Text style={s.segTileText}>{seg.mono}</Text></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.segStamp}>{String(seg.stamp).toUpperCase().slice(0, 34)}</Text>
+                    <Text style={s.segHead} numberOfLines={2}>{seg.head}</Text>
+                  </View>
+                  <Text style={s.chevron}>›</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+        </Pressable>
+      ) : null}
 
       {b.inbox ? (
         <Pressable style={s.brief} onPress={() => onNavigate("inbox")}>
@@ -199,6 +251,35 @@ const s = StyleSheet.create({
   // The app's ScrollView already pads 16; add only a touch more breathing room.
   root: { paddingHorizontal: 4, paddingBottom: 130 },
   stamp: { fontFamily: MONO, fontSize: 11, letterSpacing: 3, color: C.muted, marginTop: 8 },
+  topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  avatarChip: { width: 38, height: 38, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  avatarChipText: { fontFamily: SERIF, fontSize: 18, color: "#FFFFFF" },
+  briefing: {
+    marginTop: 22, borderRadius: 24, borderWidth: 1, borderColor: C.border,
+    backgroundColor: "rgba(129,140,248,0.10)", padding: 20,
+  },
+  briefingTitle: { fontFamily: SERIF, fontSize: 27, color: C.text },
+  briefingSub: { fontFamily: SANS, fontSize: 14, lineHeight: 20, color: "#B9B4CC", marginTop: 8 },
+  briefingRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 14 },
+  playBtn: {
+    paddingHorizontal: 18, paddingVertical: 9, borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.16)", borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.24)",
+  },
+  playText: { fontFamily: SANS_SEMI, fontSize: 13, color: C.text },
+  playMeta: { fontFamily: MONO, fontSize: 9.5, letterSpacing: 2, color: C.muted },
+  segment: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    borderRadius: 16, borderWidth: 1, borderColor: C.border,
+    backgroundColor: "rgba(4,4,10,0.45)", padding: 12,
+  },
+  segTile: {
+    width: 36, height: 36, borderRadius: 12, alignItems: "center",
+    justifyContent: "center", backgroundColor: "rgba(129,140,248,0.2)",
+  },
+  segTileText: { fontFamily: SANS_SEMI, fontSize: 15, color: C.lavender },
+  segStamp: { fontFamily: MONO, fontSize: 9, letterSpacing: 1.5, color: C.muted },
+  segHead: { fontFamily: SANS_SEMI, fontSize: 14, color: C.text, marginTop: 3 },
   greeting: { fontFamily: SERIF, fontSize: 42, lineHeight: 48, color: C.text },
   hint: { fontFamily: SANS, fontSize: 13, color: C.lavender, marginTop: 10 },
   brief: {

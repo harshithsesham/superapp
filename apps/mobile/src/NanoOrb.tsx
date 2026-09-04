@@ -355,7 +355,14 @@ export function NanoOrb({
 
   useEffect(() => {
     if (!stageSignal) return;
-    if (!openRef.current) openOrb();
+    // Tapping the ball mid-session restarts it fresh — the honest cure for
+    // \"it stopped hearing me\": tear everything down, come back listening.
+    if (openRef.current) {
+      collapseRef.current();
+      setTimeout(() => openOrb(), 350);
+    } else {
+      openOrb();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stageSignal]);
 

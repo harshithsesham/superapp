@@ -582,6 +582,7 @@ function App() {
               screen={screen}
               onNavigate={onNavigate}
               onReaction={onReaction}
+              onPlayBrief={() => setStageSignal((n) => n + 1)}
             />
           ) : (
             <SduiScreen

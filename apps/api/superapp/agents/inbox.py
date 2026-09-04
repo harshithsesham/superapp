@@ -197,6 +197,17 @@ def _draft_reply(db: Session, context: ContextSlice, provider: LLMProvider, msg)
     return resp.text.strip()
 
 
+def _auto_reply_match(db: Session, user_id: str, kind: str) -> bool:
+    if not kind:
+        return False
+    from ..models import UserFact
+    fact = db.scalar(select(UserFact).where(
+        UserFact.user_id == user_id, UserFact.domain == "inbox",
+        UserFact.key == "auto_reply_kinds"))
+    kinds = (fact.value or {}).get("kinds", []) if fact else []
+    return kind.strip().lower() in {k.lower() for k in kinds}
+
+
 def _flag_reauth(db: Session, user_id: str, email: str) -> None:
     from datetime import datetime, timezone
 
@@ -293,8 +304,32 @@ def _sync(db: Session, context: ContextSlice, trigger: dict) -> ThinkResult:
                 else:
                     msg.tier = "worth_knowing"  # verifier veto: stay visible
             if msg.tier == "needs_reply":
-                create_draft(db, user_id=context.user_id, message_id=msg.id,
-                             body=_draft_reply(db, context, provider, msg))
+                draft = create_draft(db, user_id=context.user_id, message_id=msg.id,
+                                     body=_draft_reply(db, context, provider, msg))
+                # Auto-reply: a kind the user explicitly delegated sends
+                # itself; the exchange surfaces under Worth knowing — what
+                # came in and what went out — never silently.
+                if (msg.gmail_msg_id not in backfill_ids
+                        and settings.gmail_scope_tier in ("send", "modify")
+                        and _auto_reply_match(db, context.user_id, msg.note_kind)):
+                    try:
+                        sent_id = client.send_reply(
+                            to_addr=msg.from_addr, subject=msg.subject,
+                            body=draft.body, thread_id=msg.thread_id)
+                        from ..models import utcnow as _utcnow
+                        draft.status = "sent"
+                        draft.sent_at = _utcnow()
+                        msg.tier = "worth_knowing"
+                        result.event_writes.append(EventWrite(
+                            type="draft_sent", domain="inbox",
+                            payload={"draft_id": draft.id, "gmail_sent_id": sent_id,
+                                     "auto": True, "kind": msg.note_kind}))
+                        record_decision(db, user_id=context.user_id, agent="inbox",
+                                        action_key="inbox.auto_reply", decided_by="nano",
+                                        verdict="acted",
+                                        payload={"draft_id": draft.id, "kind": msg.note_kind})
+                    except Exception:  # noqa: BLE001
+                        pass  # send failed: the draft simply waits like any other
             counts[msg.tier] += 1
             # Nano's own verdicts go in the ledger too — the "did without
             # asking" side of the autonomy panel is counted, never estimated.

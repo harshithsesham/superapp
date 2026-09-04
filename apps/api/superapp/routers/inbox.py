@@ -275,9 +275,13 @@ def inbox_state(user_id: str = Depends(current_user_id), db: Session = Depends(g
                   "auth_url": None if client.stubbed
                   else client.auth_url(state=_sign_state(user_id))}
 
+    ar_fact = _autoreply_fact(db, user_id)
+    auto_kinds = (ar_fact.value or {}).get("kinds", []) if ar_fact else []
+
     return {
         "connected": data.get("connected", False),
         "reauth": reauth,
+        "auto_reply_kinds": auto_kinds,
         "synced_at": last_sync.created_at.isoformat() if last_sync else None,
         "needs_reply": data.get("needs_reply", []),
         "worth_knowing": data.get("worth_knowing", []),
@@ -302,6 +306,73 @@ def backfill_inbox(background: BackgroundTasks,
     from ..routers.screen import _background_think
     background.add_task(_background_think, "inbox", user_id, {"kind": "backfill"})
     return {"ok": True}
+
+
+@router.post("/inbox/drafts/{draft_id}/dismiss")
+def dismiss_draft(draft_id: str, user_id: str = Depends(current_user_id),
+                  db: Session = Depends(get_db)):
+    """'Not this one': the draft leaves, the ask settles, the kernel learns."""
+    draft = get_draft(db, user_id=user_id, draft_id=draft_id)
+    if draft.status == "sent":
+        raise HTTPException(status_code=409, detail="Already sent")
+    draft.status = "dismissed"
+    msg = db.get(InboxMessage, draft.message_id)
+    if msg is not None:
+        msg.settled = True
+    from ..kernel import record_decision
+    record_decision(db, user_id=user_id, agent="inbox", action_key="inbox.send_reply",
+                    decided_by="user", verdict="rejected",
+                    payload={"draft_id": draft.id})
+    append_event(db, user_id=user_id, type="draft_dismissed", agent="inbox",
+                 domain="inbox", payload={"draft_id": draft.id})
+    db.commit()
+    return {"ok": True}
+
+
+class AutoReplyBody(BaseModel):
+    kind: str = Field(min_length=3, max_length=120)
+
+
+def _autoreply_fact(db: Session, user_id: str):
+    from sqlalchemy import select as _select
+
+    from ..models import UserFact
+    return db.scalar(_select(UserFact).where(
+        UserFact.user_id == user_id, UserFact.domain == "inbox",
+        UserFact.key == "auto_reply_kinds"))
+
+
+@router.post("/inbox/autoreply")
+def add_autoreply(body: AutoReplyBody, user_id: str = Depends(current_user_id),
+                  db: Session = Depends(get_db)):
+    """Delegate one stream: future mail of this kind gets its reply sent.
+    Every auto-reply surfaces under Worth knowing — never silent."""
+    from ..substrate.facts import write_fact
+    fact = _autoreply_fact(db, user_id)
+    value = dict(fact.value) if fact and fact.value else {"kinds": []}
+    if body.kind.strip().lower() not in [k.lower() for k in value.get("kinds", [])]:
+        value.setdefault("kinds", []).append(body.kind.strip()[:120])
+    value["kinds"] = value["kinds"][-30:]
+    write_fact(db, user_id=user_id, domain="inbox", key="auto_reply_kinds",
+               value=value, confidence=1.0, source_agent="inbox")
+    append_event(db, user_id=user_id, type="autoreply_enabled", agent="inbox",
+                 domain="inbox", payload={"kind": body.kind.strip()[:120]})
+    db.commit()
+    return {"ok": True, "kinds": value["kinds"]}
+
+
+@router.delete("/inbox/autoreply")
+def remove_autoreply(body: AutoReplyBody, user_id: str = Depends(current_user_id),
+                     db: Session = Depends(get_db)):
+    from ..substrate.facts import write_fact
+    fact = _autoreply_fact(db, user_id)
+    value = dict(fact.value) if fact and fact.value else {"kinds": []}
+    value["kinds"] = [k for k in value.get("kinds", [])
+                      if k.lower() != body.kind.strip().lower()]
+    write_fact(db, user_id=user_id, domain="inbox", key="auto_reply_kinds",
+               value=value, confidence=1.0, source_agent="inbox")
+    db.commit()
+    return {"ok": True, "kinds": value["kinds"]}
 
 
 class MuteBody(BaseModel):
