@@ -74,6 +74,10 @@ class Settings(BaseSettings):
 
     # The scout worker authenticates with this to pull/complete tasks.
     worker_token: str = ""
+    # Telegram channel gateway: the bot token, and chat->user pairing
+    # ("12345:harshith,678:cofounder").
+    telegram_bot_token: str = ""
+    telegram_chats: str = ""
     # Secret path segment for the scout's streamed one-time login window.
     scout_session_token: str = ""
     scout_public_base: str = "https://app.nutrishiksha.com"

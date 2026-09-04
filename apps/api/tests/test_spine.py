@@ -944,3 +944,27 @@ def test_flight_watch_lifecycle():
         assert client.post("/v1/tasks/flight-watch-tick", headers=W).json()["queued"] == 0
     finally:
         settings.worker_token = ""
+
+
+def test_telegram_webhook_gateway():
+    import superapp.config as config_module
+    settings = config_module.get_settings()
+    settings.telegram_bot_token = "tg-test-token"
+    settings.telegram_chats = "555:harshith"
+    try:
+        import hashlib
+        secret = hashlib.sha256(b"tg:tg-test-token").hexdigest()[:24]
+        # Wrong secret is rejected.
+        assert client.post("/v1/telegram/webhook/wrong",
+                           json={"message": {"chat": {"id": 555}, "text": "hi"}}).status_code == 403
+        # Unpaired chat gets a pairing hint, webhook still acks.
+        r = client.post(f"/v1/telegram/webhook/{secret}",
+                        json={"message": {"chat": {"id": 999}, "text": "hello"}})
+        assert r.json()["ok"]
+        # Paired chat flows through the converse brain (stubbed) and acks.
+        r = client.post(f"/v1/telegram/webhook/{secret}",
+                        json={"message": {"chat": {"id": 555}, "text": "what needs me?"}})
+        assert r.json()["ok"]
+    finally:
+        settings.telegram_bot_token = ""
+        settings.telegram_chats = ""
