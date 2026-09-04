@@ -55,6 +55,8 @@ def clean_email_text(text: str) -> str:
         t = _TAG_RE.sub(" ", t)
         t = re_mod.sub(r"<br\s*/?>|</p>|</div>|</tr>|</li>|</h[1-6]>", "\n", t, flags=re_mod.I)
         t = re_mod.sub(r"<[^>]+>", " ", t)
+        # Truncated bodies can end mid-tag; sweep tag-like leftovers too.
+        t = re_mod.sub(r"<[a-zA-Z!/][^>]*>?", " ", t)
         t = html_mod.unescape(t)
     # Plain-text alternatives annotate links as "label [https://…]" and drag
     # in mile-long tracking URLs — none of it is reading material.
