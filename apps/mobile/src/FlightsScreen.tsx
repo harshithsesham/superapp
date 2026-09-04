@@ -67,9 +67,22 @@ export function FlightsScreen({
           const running = all.find((t) => t.status === "running" || t.status === "queued");
           if (running) {
             NativeModules.NanoWidgetBridge?.startActivity(
-              "NANO · SCOUTING", running.instruction.slice(0, 80));
+              running.instruction.slice(0, 44),
+              JSON.stringify({
+                status: running.instruction.slice(0, 80),
+                stage: running.status === "queued"
+                  ? "Queued — the scout picks it up in seconds."
+                  : "The scout is out on the open web.",
+                steps: ["Queued", "Searching", "Parsing", "Done"],
+                stepIndex: running.status === "queued" ? 0 : 1,
+              }));
           } else if (activityUp.current) {
-            NativeModules.NanoWidgetBridge?.endActivity("Done — the shortlist is in.");
+            NativeModules.NanoWidgetBridge?.endActivity(JSON.stringify({
+              status: "Done — the shortlist is in.",
+              stage: "Done — the shortlist is in.",
+              steps: ["Queued", "Searching", "Parsing", "Done"],
+              stepIndex: 3,
+            }));
           }
           activityUp.current = !!running;
         } catch { /* best-effort */ }
