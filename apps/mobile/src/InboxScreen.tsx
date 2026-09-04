@@ -218,7 +218,9 @@ export function InboxScreen({
   return (
     <View style={s.backdrop}>
       <LinearGradient colors={["#141232", "#0B0910"]} locations={[0, 0.58]} style={s.sheet}>
-        <View style={s.handle} />
+        <Pressable onPress={onBack} hitSlop={12} style={s.backRow}>
+          <Text style={s.backText}>‹  MY HUB</Text>
+        </Pressable>
         <View style={s.header}>
           <LinearGradient colors={["#818CF8", "#4338CA"]}
                           start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.headTile}>
@@ -230,9 +232,6 @@ export function InboxScreen({
               Gmail{state?.synced_at ? ` · synced ${hhmm(state.synced_at)}` : ""}
             </Text>
           </View>
-          <Pressable onPress={onBack} hitSlop={12} style={{ padding: 8 }}>
-            <Text style={{ color: "rgba(255,255,255,0.6)", fontSize: 15 }}>✕</Text>
-          </Pressable>
         </View>
 
         {!state ? (
@@ -481,16 +480,10 @@ export function InboxScreen({
 }
 
 const s = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: "rgba(5,5,10,0.55)" },
-  sheet: {
-    position: "absolute", left: 0, right: 0, bottom: 0, top: 44,
-    borderTopLeftRadius: 34, borderTopRightRadius: 34, overflow: "hidden",
-    borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
-  },
-  handle: {
-    width: 38, height: 4, borderRadius: 100, alignSelf: "center",
-    backgroundColor: "rgba(255,255,255,0.25)", marginTop: 10, marginBottom: 14,
-  },
+  backdrop: { flex: 1, backgroundColor: "#0B0910" },
+  sheet: { ...StyleSheet.absoluteFillObject },
+  backRow: { paddingHorizontal: 20, paddingTop: 62, paddingBottom: 14, alignSelf: "flex-start" },
+  backText: { fontFamily: SANS_SEMI, fontSize: 13, color: "rgba(244,242,250,0.6)" },
   header: { flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 20 },
   headTile: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   headTileText: { fontFamily: SANS_SEMI, fontSize: 15, color: "#FFFFFF" },

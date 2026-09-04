@@ -624,13 +624,6 @@ function App() {
       >
         {error ? (
           <Text style={styles.error}>{error}</Text>
-        ) : screenName === "inbox" && screenCache.current.hub ? (
-          <HubScreen
-            screen={screenCache.current.hub}
-            onNavigate={onNavigate}
-            onReaction={onReaction}
-            onPlayBrief={() => setBriefPlaying(true)}
-          />
         ) : screenName === "home" || screenName === "flights" || screenName === "inbox" || screenName === "profile" ? null : screen ? (
           screenName === "hub" ? (
             <HubScreen
