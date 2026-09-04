@@ -153,21 +153,49 @@ function App() {
     screenCache.current[screenNameRef.current] = data;
     setLastTheme(data.theme === "dark" ? "dark" : "light");
     setScreen(data);
-    // Feed the home-screen glance widget from the hub's Inbox Zero card.
+    // Feed the widget family: hub card + inbox state (asks, next-up, items).
     if (screenNameRef.current === "hub") {
-      try {
-        const card: any = (data.sections ?? [])
-          .flatMap((sec: any) => sec.blocks ?? [])
-          .find((b: any) => b.type === "agent_card" && b.id === "inbox-zero");
-        if (card) {
+      (async () => {
+        try {
+          const card: any = (data.sections ?? [])
+            .flatMap((sec: any) => sec.blocks ?? [])
+            .find((b: any) => b.type === "agent_card" && b.id === "inbox-zero");
+          if (!card) return;
+          let inboxState: any = null;
+          try {
+            const r = await fetch(`${apiUrl}/v1/inbox/state`, { headers: AUTH });
+            if (r.ok) inboxState = await r.json();
+          } catch { /* stats-only widget still updates */ }
+          const asks: any[] = (inboxState?.needs_reply ?? [])
+            .filter((a: any) => !a.draft?.deferred);
+          const initials = (name: string) => {
+            const parts = String(name).trim().split(/\s+/);
+            return ((parts[0]?.[0] ?? "?") + (parts[1]?.[0] ?? "")).toUpperCase();
+          };
+          const lead = asks[0];
           NativeModules.NanoWidgetBridge?.update(JSON.stringify({
             headline: card.headline ?? "",
             body: card.body ?? "",
             stats: (card.stats ?? []).map((st: any) => [String(st.n), String(st.label)]),
             at: new Date().toTimeString().slice(0, 5),
+            needCount: asks.length,
+            handledCount: inboxState?.handled_count ?? Number(card.stats?.[0]?.n ?? 0),
+            roHeadline: lead ? `${lead.from_name} — ${lead.subject || lead.gist}` : "",
+            roSub: lead ? (lead.why_now || "Reply written and waiting — one tap.") : "",
+            items: asks.slice(0, 2).map((a: any) => ({
+              initials: initials(a.from_name), from: a.from_name,
+              sub: a.why_now ? `Reply written · ${a.why_now}` : "Reply written · one tap",
+            })),
+            nextLabel: lead ? "Next up" : "All clear",
+            nextTitle: lead ? `${lead.from_name} — ${(lead.subject || lead.gist).slice(0, 40)}` : "Nothing next",
+            nextSub: lead ? "Reply written · one tap"
+              : `${inboxState?.handled_count ?? 0} handled · nothing else today`,
+            glanceLine: lead
+              ? `${asks.length} repl${asks.length === 1 ? "y" : "ies"} wait. ${inboxState?.handled_count ?? 0} handled.`
+              : `Inbox clear. ${inboxState?.handled_count ?? 0} handled.`,
           }));
-        }
-      } catch { /* widget bridge is best-effort */ }
+        } catch { /* widget bridge is best-effort */ }
+      })();
     }
   }, []);
 
