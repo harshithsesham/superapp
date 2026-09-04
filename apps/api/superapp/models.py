@@ -78,6 +78,31 @@ class AgentTask(Base):
     result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str | None] = mapped_column(String(512), nullable=True)
     watch_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    steps: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    campaign_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class Campaign(Base):
+    """A standing scout goal: the Flycatcher pattern for anything. The
+    dispatcher re-runs the errand on cadence and the person hears about it
+    only when the top finding actually changes."""
+
+    __tablename__ = "campaigns"
+    __table_args__ = (Index("ix_campaigns_user", "user_id", "active"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    goal: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), default="research")
+    cadence_hours: Mapped[int] = mapped_column(Integer, default=24)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -338,6 +363,7 @@ class InboxMessage(Base):
     why_now: Mapped[str] = mapped_column(String(128), default="")  # urgency chip
     clear_reason: Mapped[str] = mapped_column(String(128), default="")
     note_kind: Mapped[str] = mapped_column(String(120), default="")
+    suspicious: Mapped[bool] = mapped_column(Boolean, default=False)
     verified_clear: Mapped[bool] = mapped_column(default=False)  # adversarial pass agreed
     archived: Mapped[bool] = mapped_column(default=False)  # actually archived in Gmail
     settled: Mapped[bool] = mapped_column(default=False)  # user resolved it (sent/dismissed)

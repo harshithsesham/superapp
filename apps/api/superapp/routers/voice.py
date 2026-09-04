@@ -81,7 +81,11 @@ CONVERSE_SYSTEM = (
     "instruction (what, where, budget, constraints). Tell them you're on it "
     "and will ping them when the shortlist is ready. scout_tasks in context "
     "holds recent errands and their results — answer 'what did you find' "
-    "from there, reading the shortlist naturally.\n"
+    "from there, reading the shortlist naturally. If they want the search "
+    "KEPT UP over time ('keep looking', 'check daily', 'keep an eye out'), "
+    "phrase reply_body starting 'keep checking' plus the goal — it becomes "
+    "a standing campaign, re-run daily, pinging them only when the best "
+    "find changes.\n"
     "nutrition in context is their live day — plan targets, what they ate, "
     "kcal_left, water — answer calorie/macro/water questions from it with "
     "real numbers, never estimates of your own.\n"
@@ -225,6 +229,11 @@ def _stub_converse(user_text: str, voice_inbox: dict) -> dict:
     if "send" in t and asks and asks[0]["draft_id"]:
         return {**base, "action_type": "send_draft", "draft_id": asks[0]["draft_id"],
                 "say": "Sent."}
+    if any(w in t for w in ("keep an eye", "keep looking", "keep checking",
+                            "scout", "find me", "search for", "look for",
+                            "stop all")):
+        return {**base, "action_type": "research_task", "reply_body": user_text[:1000],
+                "say": "On it."}
     for screen, words in [("inbox", ("mail", "email", "inbox")), ("home", ("meal", "food")),
                           ("flights", ("flight", "flights")),
                           ("finance", ("money", "spend")), ("stylist", ("wear", "outfit")),
@@ -305,10 +314,22 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
                 t.error = "Cancelled by you."
                 t.updated_at = utcnow()
                 cancelled += 1
+            # Mid-run tasks finish, but must never retry afterwards — the
+            # pre-set error tells retry_or_fail this was the user's word.
+            for t in db.scalars(_select(AgentTask).where(
+                    AgentTask.user_id == user_id, AgentTask.status == "running")):
+                t.error = "Cancelled by you."
+            from ..models import Campaign
+            ended = 0
+            for c in db.scalars(_select(Campaign).where(
+                    Campaign.user_id == user_id, Campaign.active.is_(True))):
+                c.active = False
+                c.updated_at = utcnow()
+                ended += 1
             append_event(db, user_id=user_id, type="task_queued", agent="orb",
                          payload={"kind": "scout_stopped", "watches": stopped,
                                   "cancelled": cancelled})
-            if stopped == 0 and cancelled == 0:
+            if stopped == 0 and cancelled == 0 and ended == 0:
                 return {"say": "The scout is already idle — no watches and "
                                "nothing queued."}
             parts = []
@@ -318,6 +339,9 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
             if cancelled:
                 parts.append(f"cancelled {cancelled} queued "
                              f"{'errand' if cancelled == 1 else 'errands'}")
+            if ended:
+                parts.append(f"ended {ended} standing "
+                             f"{'campaign' if ended == 1 else 'campaigns'}")
             return {"say": f"Done — {' and '.join(parts)}. Anything already "
                            "mid-run finishes within a minute and won't repeat."}
         if (_re.search(r"\b(watch|track|alert|monitor)\b", instruction, _re.I)
@@ -337,6 +361,39 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
             return {}
         kind = "flights" if _re.search(r"\bflights?\b", instruction, _re.I) else (
             "marketplace" if "marketplace" in instruction.lower() else "research")
+        if _re.search(r"\b(keep (?:checking|looking|watching|an eye)"
+                      r"|check(?:ing)? (?:daily|weekly|every|back|again)"
+                      r"|every (?:day|week|morning)|until i say)\b",
+                      instruction, _re.I):
+            from datetime import timedelta as _td
+
+            from ..kernel import record_decision as _record
+            from ..models import Campaign
+            active_camps = len(list(db.scalars(_select(Campaign).where(
+                Campaign.user_id == user_id, Campaign.active.is_(True)))))
+            if active_camps >= 5:
+                return {"say": "You already have five standing campaigns "
+                               "running — stop one first and I'll take "
+                               "this on."}
+            cadence = 168 if _re.search(r"\bweek", instruction, _re.I) else 24
+            camp = Campaign(user_id=user_id, goal=instruction[:800], kind=kind,
+                            cadence_hours=cadence,
+                            next_run_at=utcnow() + _td(hours=cadence))
+            db.add(camp)
+            db.flush()
+            db.add(AgentTask(user_id=user_id, kind=kind,
+                             instruction=camp.goal, campaign_id=camp.id))
+            append_event(db, user_id=user_id, type="task_queued", agent="orb",
+                         payload={"campaign_id": camp.id, "kind": "campaign",
+                                  "goal": camp.goal[:200]})
+            _record(db, user_id=user_id, agent="scout",
+                    action_key="scout.campaign", decided_by="user",
+                    verdict="accepted",
+                    payload={"campaign_id": camp.id, "risk_tier": 1,
+                             "provenance": "user"})
+            return {"say": "On it — I'll run the first pass now, then keep "
+                           f"checking {'weekly' if cadence == 168 else 'daily'} "
+                           "and only ping you when the best find changes."}
         task = AgentTask(user_id=user_id, kind=kind, instruction=instruction)
         db.add(task)
         db.flush()

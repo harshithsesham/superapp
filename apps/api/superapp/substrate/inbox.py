@@ -79,6 +79,7 @@ def inbox_context(db: Session, user_id: str) -> dict:
             "subject": m.subject, "gist": m.gist, "why_now": m.why_now,
             "clear_reason": m.clear_reason, "tier": m.tier, "settled": m.settled,
             "kind": getattr(m, "note_kind", "") or "",
+            "flagged": bool(getattr(m, "suspicious", False)),
             "received_at": aware(m.received_at).isoformat(),
             "prior_from_sender": from_counts.get(m.from_addr, 1) - 1,
             "body": _clean(m.body_text or "")[:2500],

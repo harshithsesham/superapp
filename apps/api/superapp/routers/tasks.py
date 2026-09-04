@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 from ..auth import current_user_id
 from ..config import get_settings
 from ..db import get_db
-from ..models import AgentTask, FlightWatch, utcnow
+from ..dispatcher import dispatch_tick, retry_or_fail, settle_campaign_check
+from ..models import AgentTask, Campaign, FlightWatch, utcnow
 from ..push import send_push
 from ..substrate.events import append_event
 
@@ -168,8 +169,12 @@ def _settle_watch_check(db: Session, task: AgentTask, result: dict) -> None:
 
 @router.get("/next", dependencies=[Depends(_worker_auth)])
 def next_task(db: Session = Depends(get_db)):
-    task = db.scalar(select(AgentTask).where(AgentTask.status == "queued")
-                     .order_by(AgentTask.created_at).limit(1))
+    from sqlalchemy import or_
+    task = db.scalar(select(AgentTask).where(
+        AgentTask.status == "queued",
+        or_(AgentTask.next_attempt_at.is_(None),
+            AgentTask.next_attempt_at <= utcnow()))
+        .order_by(AgentTask.created_at).limit(1))
     if task is None:
         return {"task": None}
     task.status = "running"
@@ -192,8 +197,14 @@ def complete_task(task_id: str, body: TaskResult, db: Session = Depends(get_db))
     task = db.get(AgentTask, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="No such task")
+    # Running is the normal case; queued means the lease reclaimed it while
+    # the worker was actually still finishing — accept the late result and
+    # cancel the redundant retry. Done/failed are settled: ignore.
+    if task.status not in ("running", "queued"):
+        return {"ok": True, "ignored": task.status}
     task.status = "done"
     task.result = body.result
+    task.next_attempt_at = None
     task.updated_at = utcnow()
     append_event(db, user_id=task.user_id, type="task_completed", agent="scout",
                  payload={"task_id": task.id,
@@ -201,6 +212,10 @@ def complete_task(task_id: str, body: TaskResult, db: Session = Depends(get_db))
                           "found": len(body.result.get("shortlist", []))})
     if task.watch_id:
         _settle_watch_check(db, task, body.result)
+        db.commit()
+        return {"ok": True}
+    if task.campaign_id:
+        settle_campaign_check(db, task, body.result, send_push)
         db.commit()
         return {"ok": True}
     n = len(body.result.get("shortlist", []))
@@ -223,10 +238,40 @@ def fail_task(task_id: str, body: TaskError, db: Session = Depends(get_db)):
     task = db.get(AgentTask, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="No such task")
-    task.status = "failed"
-    task.error = body.error
-    task.updated_at = utcnow()
-    append_event(db, user_id=task.user_id, type="task_failed", agent="scout",
-                 payload={"task_id": task.id, "error": body.error[:200]})
+    status = retry_or_fail(db, task, body.error)
+    db.commit()
+    return {"ok": True, "status": status}
+
+
+@router.post("/dispatch-tick", dependencies=[Depends(_worker_auth)])
+def dispatch(db: Session = Depends(get_db)):
+    """Cron calls this every ten minutes: the durable-runs spine — reclaim
+    stuck tasks, retry the retryable, queue due campaign checks."""
+    out = dispatch_tick(db)
+    db.commit()
+    return out
+
+
+@router.get("/campaigns")
+def list_campaigns(user_id: str = Depends(current_user_id),
+                   db: Session = Depends(get_db)):
+    rows = db.scalars(select(Campaign).where(
+        Campaign.user_id == user_id, Campaign.active.is_(True))
+        .order_by(Campaign.created_at.desc()).limit(10))
+    return {"campaigns": [
+        {"id": c.id, "goal": c.goal, "cadence_hours": c.cadence_hours,
+         "last_top": (c.state or {}).get("last_top", ""),
+         "runs": (c.state or {}).get("runs", 0),
+         "created_at": c.created_at.isoformat()} for c in rows]}
+
+
+@router.delete("/campaign/{campaign_id}")
+def stop_campaign(campaign_id: str, user_id: str = Depends(current_user_id),
+                  db: Session = Depends(get_db)):
+    camp = db.get(Campaign, campaign_id)
+    if camp is None or camp.user_id != user_id:
+        raise HTTPException(status_code=404, detail="No such campaign")
+    camp.active = False
+    camp.updated_at = utcnow()
     db.commit()
     return {"ok": True}
