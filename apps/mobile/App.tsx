@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  NativeModules,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -150,6 +151,22 @@ function App() {
     screenCache.current[screenNameRef.current] = data;
     setLastTheme(data.theme === "dark" ? "dark" : "light");
     setScreen(data);
+    // Feed the home-screen glance widget from the hub's Inbox Zero card.
+    if (screenNameRef.current === "hub") {
+      try {
+        const card: any = (data.sections ?? [])
+          .flatMap((sec: any) => sec.blocks ?? [])
+          .find((b: any) => b.type === "agent_card" && b.id === "inbox-zero");
+        if (card) {
+          NativeModules.NanoWidgetBridge?.update(JSON.stringify({
+            headline: card.headline ?? "",
+            body: card.body ?? "",
+            stats: (card.stats ?? []).map((st: any) => [String(st.n), String(st.label)]),
+            at: new Date().toTimeString().slice(0, 5),
+          }));
+        }
+      } catch { /* widget bridge is best-effort */ }
+    }
   }, []);
 
   // GET = pure render from the substrate; POST /refresh runs the agent's

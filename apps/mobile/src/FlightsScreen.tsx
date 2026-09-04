@@ -3,6 +3,7 @@
 // the orb (/v1/voice/converse), so "find me flights" and "watch this route"
 // work identically here and by voice.
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { NativeModules } from "react-native";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -47,6 +48,7 @@ export function FlightsScreen({
   const [sending, setSending] = useState(false);
   const [watches, setWatches] = useState<Watch[]>([]);
   const shownTasks = useRef<Set<string>>(new Set());
+  const activityUp = useRef(false);
   const scroller = useRef<ScrollView>(null);
   const alive = useRef(true);
 
@@ -59,8 +61,20 @@ export function FlightsScreen({
       if (!alive.current) return;
       if (wRes.ok) setWatches((await wRes.json()).watches ?? []);
       if (tRes.ok) {
-        const tasks: FlightTask[] = ((await tRes.json()).tasks ?? [])
-          .filter((t: FlightTask) => t.kind === "flights" && t.status === "done" && t.result?.shortlist?.length);
+        const all: FlightTask[] = (await tRes.json()).tasks ?? [];
+        // Lock-screen presence: a Live Activity while the scout is out.
+        try {
+          const running = all.find((t) => t.status === "running" || t.status === "queued");
+          if (running) {
+            NativeModules.NanoWidgetBridge?.startActivity(
+              "NANO · SCOUTING", running.instruction.slice(0, 80));
+          } else if (activityUp.current) {
+            NativeModules.NanoWidgetBridge?.endActivity("Done — the shortlist is in.");
+          }
+          activityUp.current = !!running;
+        } catch { /* best-effort */ }
+        const tasks: FlightTask[] = all.filter(
+          (t: FlightTask) => t.kind === "flights" && t.status === "done" && t.result?.shortlist?.length);
         // Newly completed searches drop into the thread as result cards.
         const fresh = tasks.filter((t) => !shownTasks.current.has(t.id));
         if (fresh.length) {
