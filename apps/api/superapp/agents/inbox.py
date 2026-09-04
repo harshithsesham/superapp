@@ -47,7 +47,10 @@ TRIAGE_SYSTEM = (
     "newsletters, social pings, automated noise). gist: one calm line, max 15 "
     "words. why_now: for needs_reply only, the urgency in max 8 words (e.g. "
     "'deadline today EOD'), else empty. clear_reason: for cleared only, one of: "
-    "promotion, newsletter, social, automated, other."
+    "promotion, newsletter, social, automated, other. kind: a short generic "
+    "label for this email as a recurring stream, phrased so 'stop showing "
+    "<kind>' reads naturally (e.g. 'seat changes from airlines', 'build "
+    "notices from TestFlight', 'comment threads from Notion'); max 6 words."
 )
 TRIAGE_SCHEMA = {
     "type": "object",
@@ -56,8 +59,9 @@ TRIAGE_SCHEMA = {
         "gist": {"type": "string"},
         "why_now": {"type": "string"},
         "clear_reason": {"type": "string"},
+        "kind": {"type": "string"},
     },
-    "required": ["tier", "gist", "why_now", "clear_reason"],
+    "required": ["tier", "gist", "why_now", "clear_reason", "kind"],
     "additionalProperties": False,
 }
 
@@ -268,6 +272,7 @@ def _sync(db: Session, context: ContextSlice, trigger: dict) -> ThinkResult:
             msg.gist = verdict["gist"][:250]
             msg.why_now = verdict["why_now"][:120]
             msg.clear_reason = verdict["clear_reason"][:120]
+            msg.note_kind = str(verdict.get("kind", ""))[:120]
 
             if msg.tier in ("needs_reply", "worth_knowing"):
                 from ..people import update_person

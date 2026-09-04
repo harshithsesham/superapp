@@ -337,6 +337,7 @@ class InboxMessage(Base):
     gist: Mapped[str] = mapped_column(String(256), default="")  # one-line summary
     why_now: Mapped[str] = mapped_column(String(128), default="")  # urgency chip
     clear_reason: Mapped[str] = mapped_column(String(128), default="")
+    note_kind: Mapped[str] = mapped_column(String(120), default="")
     verified_clear: Mapped[bool] = mapped_column(default=False)  # adversarial pass agreed
     archived: Mapped[bool] = mapped_column(default=False)  # actually archived in Gmail
     settled: Mapped[bool] = mapped_column(default=False)  # user resolved it (sent/dismissed)

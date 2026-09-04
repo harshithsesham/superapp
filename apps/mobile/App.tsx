@@ -321,6 +321,7 @@ function App() {
   }, []);
 
   const [orbSignal, setOrbSignal] = useState(0);
+  const [stageSignal, setStageSignal] = useState(0);
 
   const onFixMeal = useCallback((mealId: string) => {
     Alert.prompt(
@@ -599,7 +600,8 @@ function App() {
 
       {screenName === "inbox" && !error ? (
         <View style={{ position: "absolute", top: 60, left: 0, right: 0, bottom: 0 }}>
-          <InboxScreen apiUrl={apiUrl} auth={AUTH} onBack={() => setScreenName("hub")} />
+          <InboxScreen apiUrl={apiUrl} auth={AUTH} onBack={() => setScreenName("hub")}
+                       onOpenStage={() => setStageSignal((n) => n + 1)} />
         </View>
       ) : null}
 
@@ -666,6 +668,7 @@ function App() {
         apiUrl={apiUrl}
         auth={AUTH}
         openSignal={orbSignal}
+        stageSignal={stageSignal}
         onNavigate={onNavigate}
         onRefreshInbox={() => {
           setScreenName("inbox");

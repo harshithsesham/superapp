@@ -77,11 +77,25 @@ def inbox_context(db: Session, user_id: str) -> dict:
             "id": m.id, "from_name": m.from_name, "from_addr": m.from_addr,
             "subject": m.subject, "gist": m.gist, "why_now": m.why_now,
             "clear_reason": m.clear_reason, "tier": m.tier, "settled": m.settled,
+            "kind": getattr(m, "note_kind", "") or "",
             "received_at": aware(m.received_at).isoformat(),
             "prior_from_sender": from_counts.get(m.from_addr, 1) - 1,
             "body": (m.body_text or "")[:2500],
             "draft": {"id": d.id, "body": d.body, "status": d.status, "deferred": deferred} if d else None,
         }
+
+    from ..models import UserFact
+    mutes_fact = db.scalar(select(UserFact).where(
+        UserFact.user_id == user_id, UserFact.domain == "inbox",
+        UserFact.key == "mutes"))
+    mutes = mutes_fact.value if mutes_fact and mutes_fact.value else {}
+    muted_kinds = {k.lower() for k in mutes.get("kinds", [])}
+    muted_senders = {a.lower() for a in mutes.get("senders", [])}
+
+    def muted(m) -> bool:
+        return (m.from_addr.lower() in muted_senders
+                or ((getattr(m, "note_kind", "") or "").lower() in muted_kinds
+                    if getattr(m, "note_kind", "") else False))
 
     open_asks = [row(m) for m in msgs if m.tier == "needs_reply" and not m.settled]
     cleared = [m for m in msgs if m.tier in ("cleared", "receipt")]
@@ -130,8 +144,11 @@ def inbox_context(db: Session, user_id: str) -> dict:
         "connected": bool(accounts(db, user_id)),
         "needs_reply": open_asks,
         "primary": primary,
-        "worth_knowing": [row(m) for m in msgs if m.tier == "worth_knowing" and not m.settled][:8],
-        "cleared_count": len(cleared),
+        "worth_knowing": [row(m) for m in msgs
+                          if m.tier == "worth_knowing" and not m.settled
+                          and not muted(m)][:8],
+        "cleared_count": len(cleared) + sum(
+            1 for m in msgs if m.tier == "worth_knowing" and not m.settled and muted(m)),
         "cleared_by_reason": cleared_by_reason,
         "receipts": [row(m) for m in msgs if m.tier == "receipt"][:10],
         "pending_count": sum(1 for m in msgs if m.tier == "pending"),

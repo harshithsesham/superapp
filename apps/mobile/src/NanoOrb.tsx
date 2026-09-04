@@ -29,6 +29,7 @@ export function NanoOrb({
   onRefreshInbox,
   onActed,
   openSignal,
+  stageSignal,
 }: {
   apiUrl: string;
   auth: Record<string, string>;
@@ -36,6 +37,7 @@ export function NanoOrb({
   onRefreshInbox: () => void;
   onActed?: () => void;
   openSignal?: number;
+  stageSignal?: number;
 }) {
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
@@ -44,6 +46,12 @@ export function NanoOrb({
   const [say, setSay] = useState("");
   const [sayUrl, setSayUrl] = useState<string | null>(null);
   const [progress, setProgress] = useState(0); // interview progress, 0 hides the bar
+  // The stage: full-screen conversation surface with live captions —
+  // same session as the edge ball, bigger presence.
+  const [stage, setStage] = useState(false);
+  const [capWords, setCapWords] = useState<string[]>([]);
+  const [capN, setCapN] = useState(0);
+  const capTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const mode = useRef<OrbMode>("converse");
   const rtActive = useRef(false);
@@ -330,6 +338,42 @@ export function NanoOrb({
     if (openSignal && !openRef.current) openOrb();
   }, [openSignal]);
 
+  useEffect(() => {
+    if (!stageSignal) return;
+    setStage(true);
+    if (!openRef.current) openOrb();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageSignal]);
+
+  // Captions: reveal Nano's words as it speaks; a fresh interruption wipes
+  // the slate so the conversation restarts clean, like talking to a person.
+  useEffect(() => {
+    if (!stage || !say) return;
+    const words = say.split(/\s+/).filter(Boolean);
+    setCapWords(words);
+    setCapN(0);
+    if (capTimer.current) clearInterval(capTimer.current);
+    capTimer.current = setInterval(() => {
+      setCapN((n) => {
+        if (n + 1 >= words.length) {
+          if (capTimer.current) clearInterval(capTimer.current);
+          return words.length;
+        }
+        return n + 1;
+      });
+    }, 130);
+    return () => {
+      if (capTimer.current) clearInterval(capTimer.current);
+    };
+  }, [say, stage]);
+
+  useEffect(() => {
+    if (!stage || !transcript) return;
+    if (capTimer.current) clearInterval(capTimer.current);
+    setCapWords([]);
+    setCapN(0);
+  }, [transcript, stage]);
+
   // Closed: tap brings Nano over. Open: tap sends it back to the edge —
   // the only way it leaves besides an explicit goodbye.
   const onOrbTap = useCallback(() => {
@@ -348,6 +392,31 @@ export function NanoOrb({
   const orbScale = glide.interpolate({ inputRange: [0, 1], outputRange: [1, 1.55] });
 
   return (
+    <>
+    {stage ? (
+      <View style={o.stage}>
+        <Pressable style={o.stageClose} onPress={() => setStage(false)} hitSlop={14}>
+          <Text style={{ color: "#8A87A3", fontSize: 22 }}>✕</Text>
+        </Pressable>
+        <Animated.View style={[o.stageOrb, { transform: [{ scale }] }]}>
+          <LinearGradient
+            colors={["#C7B8FF", "#6D5BD0", "#2A2050"]}
+            start={{ x: 0.2, y: 0.1 }} end={{ x: 0.8, y: 1 }}
+            style={{ flex: 1, borderRadius: 46 }}
+          />
+        </Animated.View>
+        {capWords.length ? (
+          <Text style={o.stageCaption}>{capWords.slice(0, capN + 1).join(" ")}</Text>
+        ) : (
+          <>
+            <Text style={o.stageState}>
+              {phase === "speaking" ? "SPEAKING" : phase === "thinking" ? "·  ·  ·" : "LISTENING"}
+            </Text>
+            {transcript ? <Text style={o.stageHeard}>{transcript}</Text> : null}
+          </>
+        )}
+      </View>
+    ) : null}
     <View pointerEvents="box-none" style={[o.dock, { top: insets.top + 64 }]}>
       <Animated.View
         style={{
@@ -367,7 +436,7 @@ export function NanoOrb({
           />
         </Pressable>
       </Animated.View>
-      {open && (progress > 0 || phase === "listening" || phase === "thinking" || !!say) ? (
+      {!stage && open && (progress > 0 || phase === "listening" || phase === "thinking" || !!say) ? (
         <View pointerEvents="box-none" style={o.bubble}>
           {progress > 0 ? (
             <View style={o.progressTrack}>
@@ -384,10 +453,37 @@ export function NanoOrb({
         </View>
       ) : null}
     </View>
+    </>
   );
 }
 
 const o = StyleSheet.create({
+  stage: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(4,4,10,0.97)",
+    alignItems: "center",
+    paddingTop: 130,
+    paddingHorizontal: 30,
+    zIndex: 60,
+  },
+  stageClose: { position: "absolute", top: 26, right: 26 },
+  stageOrb: {
+    width: 92, height: 92, borderRadius: 46,
+    shadowColor: "#C7B8FF", shadowOpacity: 0.85, shadowRadius: 28,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  stageState: {
+    fontFamily: "JetBrainsMono_400Regular", fontSize: 12, letterSpacing: 4,
+    color: "#8A87A3", marginTop: 34,
+  },
+  stageHeard: {
+    fontFamily: "InstrumentSerif_400Regular", fontSize: 22, lineHeight: 30,
+    color: "#C7B8FF", marginTop: 16, textAlign: "center",
+  },
+  stageCaption: {
+    fontFamily: "InstrumentSerif_400Regular", fontSize: 28, lineHeight: 38,
+    color: "#F4F2FA", marginTop: 30, textAlign: "center",
+  },
   dock: {
     position: "absolute",
     right: -14, // half-tucked into the edge when idle

@@ -7,7 +7,9 @@ Scopes climb the trust ladder with settings.gmail_scope_tier:
   read -> gmail.readonly | send -> +gmail.send | modify -> +gmail.modify
 """
 import base64
+import html as html_mod
 import json
+import re as re_mod
 import time
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
@@ -39,6 +41,24 @@ MAX_BODY_CHARS = 8000
 # label heuristic's.
 SKIP_LABELS = {"SPAM", "TRASH", "SENT", "DRAFT", "CATEGORY_SOCIAL",
                "CATEGORY_PROMOTIONS"}
+
+
+_TAG_RE = re_mod.compile(r"<(script|style)[^>]*>.*?</\1>", re_mod.S | re_mod.I)
+
+
+def _html_to_text(text: str) -> str:
+    """Mail is for reading: if a body arrived as (or riddled with) HTML,
+    flatten it to the text a person would see in their mail app."""
+    if "<" not in text or ">" not in text:
+        return text
+    t = _TAG_RE.sub(" ", text)
+    t = re_mod.sub(r"<br\s*/?>|</p>|</div>|</tr>|</li>|</h[1-6]>", "\n", t, flags=re_mod.I)
+    t = re_mod.sub(r"<[^>]+>", " ", t)
+    t = html_mod.unescape(t)
+    t = re_mod.sub(r"[ \t]+", " ", t)
+    t = re_mod.sub(r" ?\n ?", "\n", t)
+    t = re_mod.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
 
 
 class GmailClient:
@@ -178,16 +198,22 @@ class GmailClient:
                    for h in raw.get("payload", {}).get("headers", [])}
         name, addr = parseaddr(headers.get("from", ""))
 
-        def body_of(part) -> str:
-            if part.get("mimeType") == "text/plain" and part.get("body", {}).get("data"):
+        def part_text(part, mime: str) -> str:
+            if part.get("mimeType") == mime and part.get("body", {}).get("data"):
                 return base64.urlsafe_b64decode(part["body"]["data"]).decode(errors="ignore")
-            return "".join(body_of(p) for p in part.get("parts", []))
+            return "".join(part_text(p, mime) for p in part.get("parts", []))
+
+        payload = raw.get("payload", {})
+        body = part_text(payload, "text/plain")
+        if not body.strip():
+            body = part_text(payload, "text/html")
+        body = _html_to_text(body) or raw.get("snippet", "")
 
         return {
             "gmail_msg_id": raw["id"], "thread_id": raw.get("threadId", ""),
             "from_name": name or addr, "from_addr": addr,
             "subject": headers.get("subject", ""),
-            "body_text": (body_of(raw.get("payload", {})) or raw.get("snippet", ""))[:MAX_BODY_CHARS],
+            "body_text": body[:MAX_BODY_CHARS],
             "received_at": datetime.fromtimestamp(
                 int(raw.get("internalDate", 0)) / 1000, tz=timezone.utc
             ).isoformat(),

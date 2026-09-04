@@ -191,40 +191,6 @@ export function HubScreen({
         </>
       ) : null}
 
-      {b.autonomy ? (
-        <>
-          <View style={s.sectionHead}>
-            <Text style={s.sectionTitle}>Without asking</Text>
-            <Text style={s.sectionAside}>EARNED, NOT CONFIGURED</Text>
-          </View>
-          <View style={s.panel}>
-            {b.autonomy.list.items.map((it, i) => {
-              const asks = /asks first|demoted/i.test(it.subtitle ?? "");
-              return (
-                <View key={it.id} style={[s.autoItem, i > 0 && s.tlDivider]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.autoTitle}>{it.title}</Text>
-                    {it.subtitle ? <Text style={s.autoSub}>{it.subtitle}</Text> : null}
-                  </View>
-                  <View style={[s.chip, asks ? s.chipAsks : s.chipAuto]}>
-                    <Text style={[s.chipText, { color: asks ? C.lavender : C.mint }]}>
-                      {asks ? "ASKS FIRST" : "AUTO"}
-                    </Text>
-                  </View>
-                </View>
-              );
-            })}
-            {b.autonomy.actions?.actions.map((a) => (
-              <Pressable key={a.id} style={s.promoteBtn}
-                         onPress={() => onReaction("action_tapped", a.id)}>
-                <Text style={s.promoteText}>{a.label}</Text>
-              </Pressable>
-            ))}
-            {b.autonomy.caption ? <Text style={s.tlFooter}>{b.autonomy.caption}</Text> : null}
-          </View>
-        </>
-      ) : null}
-
       <View style={s.sectionHead}>
         <Text style={s.sectionTitle}>Your Hub</Text>
       </View>

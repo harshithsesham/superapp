@@ -7,7 +7,9 @@ import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Linking,
+  PanResponder,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -36,9 +38,39 @@ type Ask = {
   received_at: string; body: string; draft: Draft | null;
 };
 type Note = {
-  id: string; from_name: string; subject: string; gist: string; why_now: string;
-  body: string;
+  id: string; from_name: string; from_addr: string; subject: string;
+  gist: string; why_now: string; kind: string; body: string;
 };
+
+// Swipe a row off the list: past the threshold it slides away and settles.
+function SwipeRow({ children, onDismiss }: {
+  children: React.ReactNode; onDismiss: () => void;
+}) {
+  const tx = useRef(new Animated.Value(0)).current;
+  const pan = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) =>
+        Math.abs(g.dx) > 14 && Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
+      onPanResponderMove: (_e, g) => tx.setValue(g.dx),
+      onPanResponderRelease: (_e, g) => {
+        if (Math.abs(g.dx) > 90) {
+          Animated.timing(tx, {
+            toValue: g.dx > 0 ? 420 : -420, duration: 180, useNativeDriver: true,
+          }).start(onDismiss);
+        } else {
+          Animated.spring(tx, { toValue: 0, useNativeDriver: true }).start();
+        }
+      },
+      onPanResponderTerminate: () =>
+        Animated.spring(tx, { toValue: 0, useNativeDriver: true }).start(),
+    })
+  ).current;
+  return (
+    <Animated.View style={{ transform: [{ translateX: tx }] }} {...pan.panHandlers}>
+      {children}
+    </Animated.View>
+  );
+}
 type HandledCat = { name: string; n: string; count: number };
 type SentItem = { to_name: string; to_addr: string; subject: string; body: string; sent_at: string };
 type InboxState = {
@@ -61,10 +93,12 @@ export function InboxScreen({
   apiUrl,
   auth,
   onBack,
+  onOpenStage,
 }: {
   apiUrl: string;
   auth: Record<string, string>;
   onBack: () => void;
+  onOpenStage: () => void;
 }) {
   const [state, setState] = useState<InboxState | null>(null);
   const [openNote, setOpenNote] = useState<string | null>(null);
@@ -109,6 +143,24 @@ export function InboxScreen({
       if (alive.current) setBusyDraft(null);
     }
   }, [apiUrl, auth, busyDraft, refresh]);
+
+  const settleNote = useCallback(async (id: string) => {
+    setState((st) => st ? { ...st, worth_knowing: st.worth_knowing.filter((n) => n.id !== id) } : st);
+    try {
+      await fetch(`${apiUrl}/v1/inbox/notes/${id}/settle`, { method: "POST", headers: auth });
+    } catch { /* next refresh reconciles */ }
+  }, [apiUrl, auth]);
+
+  const muteRule = useCallback(async (rule: { kind?: string; sender?: string }) => {
+    try {
+      await fetch(`${apiUrl}/v1/inbox/mute`, {
+        method: "POST",
+        headers: { ...auth, "Content-Type": "application/json" },
+        body: JSON.stringify(rule),
+      });
+      refresh();
+    } catch { /* ignore */ }
+  }, [apiUrl, auth, refresh]);
 
   const clearNotes = useCallback(async () => {
     try {
@@ -252,25 +304,38 @@ export function InboxScreen({
           ) : state.worth_knowing.map((n, i) => {
             const open = openNote === n.id;
             return (
-              <Pressable key={n.id} onPress={() => setOpenNote(open ? null : n.id)}
-                         style={[s.noteRow, i > 0 && s.divider]}>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.noteFrom}>{n.from_name}</Text>
-                  <Text style={s.noteGist}>{n.gist || n.subject}</Text>
-                  {open ? (
-                    <>
-                      <Text style={s.noteBody}>{n.body.trim().slice(0, 1200)}</Text>
-                      <Text style={s.noteWhy}>
-                        WHY THIS SURFACED{"\n"}
-                        <Text style={s.noteWhyBody}>
-                          {n.why_now || "Real information, nothing to do — flagged so it doesn't slip past you."}
+              <SwipeRow key={n.id} onDismiss={() => settleNote(n.id)}>
+                <Pressable onPress={() => setOpenNote(open ? null : n.id)}
+                           style={[s.noteRow, i > 0 && s.divider]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.noteFrom}>{n.from_name}</Text>
+                    <Text style={s.noteGist}>{n.gist || n.subject}</Text>
+                    {open ? (
+                      <>
+                        <Text style={s.noteBody}>{n.body.trim().slice(0, 1200)}</Text>
+                        <Text style={s.noteWhy}>
+                          WHY THIS SURFACED{"\n"}
+                          <Text style={s.noteWhyBody}>
+                            {n.why_now || "Real information, nothing to do — flagged so it doesn't slip past you."}
+                          </Text>
                         </Text>
-                      </Text>
-                    </>
-                  ) : null}
-                </View>
-                <Text style={s.disclose}>{open ? "–" : "+"}</Text>
-              </Pressable>
+                        <View style={s.muteRow}>
+                          {n.kind ? (
+                            <Pressable style={s.muteBtn} onPress={() => muteRule({ kind: n.kind })}>
+                              <Text style={s.muteText}>Stop showing {n.kind}</Text>
+                            </Pressable>
+                          ) : null}
+                          <Pressable style={s.muteBtnGhost}
+                                     onPress={() => muteRule({ sender: n.from_addr })}>
+                            <Text style={s.muteTextGhost}>Never from {n.from_name}</Text>
+                          </Pressable>
+                        </View>
+                      </>
+                    ) : null}
+                  </View>
+                  <Text style={s.disclose}>{open ? "–" : "+"}</Text>
+                </Pressable>
+              </SwipeRow>
             );
           })}
         </View>
@@ -326,6 +391,11 @@ export function InboxScreen({
         ) : null}
       </ScrollView>
 
+      <Pressable style={s.centerBall} onPress={onOpenStage}>
+        <LinearGradient colors={["#C7B8FF", "#6D5BD0", "#2A2050"]}
+                        start={{ x: 0.2, y: 0.1 }} end={{ x: 0.8, y: 1 }}
+                        style={s.centerBallInner} />
+      </Pressable>
     </View>
   );
 }
@@ -339,6 +409,24 @@ const s = StyleSheet.create({
   sub: { fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: C.muted, marginTop: 4 },
   liveChip: { borderWidth: 1, borderColor: "rgba(124,247,196,0.4)", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
   liveText: { fontFamily: MONO, fontSize: 10, letterSpacing: 2, color: C.mint },
+  centerBall: { position: "absolute", bottom: 26, alignSelf: "center" },
+  centerBallInner: {
+    width: 54, height: 54, borderRadius: 27,
+    shadowColor: "#C7B8FF", shadowOpacity: 0.8, shadowRadius: 18,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  muteRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 12 },
+  muteBtn: {
+    borderRadius: 999, backgroundColor: "rgba(199,184,255,0.1)",
+    borderWidth: 1, borderColor: "rgba(199,184,255,0.3)",
+    paddingHorizontal: 12, paddingVertical: 7,
+  },
+  muteText: { fontFamily: SANS_SEMI, fontSize: 12, color: C.lav },
+  muteBtnGhost: {
+    borderRadius: 999, borderWidth: 1, borderColor: C.border,
+    paddingHorizontal: 12, paddingVertical: 7,
+  },
+  muteTextGhost: { fontFamily: SANS_SEMI, fontSize: 12, color: C.muted },
   reauthBanner: { borderRadius: 18, borderWidth: 1, borderColor: "rgba(255,157,168,0.45)", backgroundColor: "rgba(255,157,168,0.07)", padding: 16, marginTop: 22 },
   reauthTitle: { fontFamily: SANS_SEMI, fontSize: 15, color: C.rose },
   reauthBody: { fontFamily: SANS, fontSize: 13, lineHeight: 19, color: C.body, marginTop: 6 },

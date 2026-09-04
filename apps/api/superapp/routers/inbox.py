@@ -304,6 +304,52 @@ def backfill_inbox(background: BackgroundTasks,
     return {"ok": True}
 
 
+class MuteBody(BaseModel):
+    kind: str | None = Field(default=None, max_length=120)
+    sender: str | None = Field(default=None, max_length=320)
+
+
+@router.post("/inbox/mute")
+def mute(body: MuteBody, user_id: str = Depends(current_user_id),
+         db: Session = Depends(get_db)):
+    """'Stop showing <kind>' / 'Never from <sender>' — a standing filter.
+    Muted mail still syncs; it just files itself into handled."""
+    if not body.kind and not body.sender:
+        raise HTTPException(status_code=422, detail="kind or sender required")
+    from sqlalchemy import select as _select
+
+    from ..models import UserFact
+    from ..substrate.facts import write_fact
+    fact = db.scalar(_select(UserFact).where(
+        UserFact.user_id == user_id, UserFact.domain == "inbox",
+        UserFact.key == "mutes"))
+    value = dict(fact.value) if fact and fact.value else {"kinds": [], "senders": []}
+    if body.kind and body.kind.strip().lower() not in [k.lower() for k in value.get("kinds", [])]:
+        value.setdefault("kinds", []).append(body.kind.strip()[:120])
+    if body.sender and body.sender.strip().lower() not in [x.lower() for x in value.get("senders", [])]:
+        value.setdefault("senders", []).append(body.sender.strip().lower()[:320])
+    value["kinds"] = value.get("kinds", [])[-40:]
+    value["senders"] = value.get("senders", [])[-40:]
+    write_fact(db, user_id=user_id, domain="inbox", key="mutes", value=value,
+               confidence=1.0, source_agent="inbox")
+    append_event(db, user_id=user_id, type="inbox_muted", agent="inbox", domain="inbox",
+                 payload={"kind": body.kind or "", "sender": body.sender or ""})
+    db.commit()
+    return {"ok": True, "mutes": value}
+
+
+@router.post("/inbox/notes/{message_id}/settle")
+def settle_note(message_id: str, user_id: str = Depends(current_user_id),
+                db: Session = Depends(get_db)):
+    """Swipe-away: one note leaves the list, nothing else changes."""
+    m = db.get(InboxMessage, message_id)
+    if m is None or m.user_id != user_id:
+        raise HTTPException(status_code=404, detail="No such message")
+    m.settled = True
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/inbox/notes/clear")
 def clear_notes(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     """The Worth-knowing 'Clear' button: mark every note as seen/settled."""
