@@ -132,7 +132,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db),
         in_tag = False
         try:
             with client.messages.stream(
-                model=settings.model_default,
+                model=settings.realtime_model,
                 max_tokens=400,
                 system=[{"type": "text", "text": REALTIME_SYSTEM,
                          "cache_control": {"type": "ephemeral"}}],

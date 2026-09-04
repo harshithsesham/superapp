@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Model-per-task routing (architecture §5: big model for cognition, small for routing).
     # Downgrade a task only when cost events + the golden set prove it doesn't hurt.
     model_default: str = "claude-opus-5"
+    # The realtime voice brain trades a notch of depth for first-token speed —
+    # conversation lives or dies on turn latency.
+    realtime_model: str = "claude-sonnet-5"
     model_routing: str = "claude-haiku-4-5"
     # How long complete_batch() waits for the Batches API (cron jobs tolerate this).
     llm_batch_max_wait_seconds: int = 3600

@@ -64,6 +64,10 @@ export function NanoOrb({
   const openRef = useRef(false);
   const speakTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const reconnected = useRef(false);
+  const startRealtimeRef = useRef<() => Promise<boolean>>(async () => false);
+  const collapseRef = useRef<() => void>(() => {});
+
   const glide = useRef(new Animated.Value(0)).current;
   const breath = useRef(new Animated.Value(0)).current;
 
@@ -275,11 +279,21 @@ export function NanoOrb({
         },
         onDisconnect: () => {
           if (!rtActive.current || !openRef.current) return;
-          // Session died under us (quota, network). The ball stays; the
-          // turn-based loop picks the conversation up without a beat.
+          // Session died under us (quota, network). Try ONE silent
+          // reconnect; if that fails, say so and hang up cleanly —
+          // a zombie \"listening\" state is worse than an honest goodbye.
           rtActive.current = false;
           if (rtPoll.current) clearInterval(rtPoll.current);
-          listen();
+          (async () => {
+            if (!reconnected.current) {
+              reconnected.current = true;
+              if (await startRealtimeRef.current()) return;
+            }
+            setSay("The live line dropped. Tap the ball and we pick it right back up.");
+            setTimeout(() => {
+              if (openRef.current) collapseRef.current();
+            }, 3500);
+          })();
         },
         onError: () => {},
       } as never);
@@ -313,6 +327,7 @@ export function NanoOrb({
 
   const openOrb = useCallback(async () => {
     openRef.current = true;
+    reconnected.current = false;
     emptyListens.current = 0;
     history.current = [];
     setOpen(true);
@@ -379,6 +394,13 @@ export function NanoOrb({
     setCapWords([]);
     setCapN(0);
   }, [transcript, stage]);
+
+  useEffect(() => {
+    startRealtimeRef.current = startRealtime;
+  }, [startRealtime]);
+  useEffect(() => {
+    collapseRef.current = collapse;
+  }, [collapse]);
 
   // Closed: tap brings Nano over. Open: tap sends it back to the edge —
   // the only way it leaves besides an explicit goodbye.
