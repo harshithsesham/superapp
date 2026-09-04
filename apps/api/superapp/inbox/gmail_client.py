@@ -43,22 +43,33 @@ SKIP_LABELS = {"SPAM", "TRASH", "SENT", "DRAFT", "CATEGORY_SOCIAL",
                "CATEGORY_PROMOTIONS"}
 
 
-_TAG_RE = re_mod.compile(r"<(script|style)[^>]*>.*?</\1>", re_mod.S | re_mod.I)
+_TAG_RE = re_mod.compile(r"<(script|style|head)[^>]*>.*?</\1>", re_mod.S | re_mod.I)
 
 
-def _html_to_text(text: str) -> str:
-    """Mail is for reading: if a body arrived as (or riddled with) HTML,
-    flatten it to the text a person would see in their mail app."""
-    if "<" not in text or ">" not in text:
-        return text
-    t = _TAG_RE.sub(" ", text)
-    t = re_mod.sub(r"<br\s*/?>|</p>|</div>|</tr>|</li>|</h[1-6]>", "\n", t, flags=re_mod.I)
-    t = re_mod.sub(r"<[^>]+>", " ", t)
-    t = html_mod.unescape(t)
+def clean_email_text(text: str) -> str:
+    """Mail is for reading. Flatten HTML, drop tracking links and bracketed
+    URL annotations, kill separator art and whitespace canyons — leave the
+    words a person would actually read in their mail app."""
+    t = text or ""
+    if "<" in t and ">" in t:
+        t = _TAG_RE.sub(" ", t)
+        t = re_mod.sub(r"<br\s*/?>|</p>|</div>|</tr>|</li>|</h[1-6]>", "\n", t, flags=re_mod.I)
+        t = re_mod.sub(r"<[^>]+>", " ", t)
+        t = html_mod.unescape(t)
+    # Plain-text alternatives annotate links as "label [https://…]" and drag
+    # in mile-long tracking URLs — none of it is reading material.
+    t = re_mod.sub(r"[<\[(]\s*https?://[^\])>\s]+\s*[\])>]", "", t)
+    t = re_mod.sub(r"https?://\S{25,}", "", t)
+    t = re_mod.sub(r"\[[^\]\s]{25,}\]", "", t)
+    t = re_mod.sub(r"^[\s>]*[-_=~*•—]{3,}[\s]*$", "", t, flags=re_mod.M)
     t = re_mod.sub(r"[ \t]+", " ", t)
-    t = re_mod.sub(r" ?\n ?", "\n", t)
+    t = "\n".join(line.strip() for line in t.split("\n"))
     t = re_mod.sub(r"\n{3,}", "\n\n", t)
     return t.strip()
+
+
+# Back-compat name used at ingest.
+_html_to_text = clean_email_text
 
 
 class GmailClient:

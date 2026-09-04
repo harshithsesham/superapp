@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..inbox.gmail_client import clean_email_text as _clean
 from ..models import Event, GmailAccount, InboxDraft, InboxMessage
 
 
@@ -80,7 +81,7 @@ def inbox_context(db: Session, user_id: str) -> dict:
             "kind": getattr(m, "note_kind", "") or "",
             "received_at": aware(m.received_at).isoformat(),
             "prior_from_sender": from_counts.get(m.from_addr, 1) - 1,
-            "body": (m.body_text or "")[:2500],
+            "body": _clean(m.body_text or "")[:2500],
             "draft": {"id": d.id, "body": d.body, "status": d.status, "deferred": deferred} if d else None,
         }
 

@@ -394,27 +394,39 @@ export function NanoOrb({
   return (
     <>
     {stage ? (
-      <View style={o.stage}>
-        <Pressable style={o.stageClose} onPress={() => setStage(false)} hitSlop={14}>
-          <Text style={{ color: "#8A87A3", fontSize: 22 }}>✕</Text>
-        </Pressable>
-        <Animated.View style={[o.stageOrb, { transform: [{ scale }] }]}>
-          <LinearGradient
-            colors={["#C7B8FF", "#6D5BD0", "#2A2050"]}
-            start={{ x: 0.2, y: 0.1 }} end={{ x: 0.8, y: 1 }}
-            style={{ flex: 1, borderRadius: 46 }}
-          />
-        </Animated.View>
+      <View style={o.vdock}>
+        <View style={o.vdockHead}>
+          <View style={o.waveRow}>
+            {[10, 16, 8, 14, 11, 17, 9].map((h, i) => (
+              <Animated.View key={i} style={[o.waveBar, {
+                height: h,
+                opacity: breath.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: i % 2 ? [0.35, 0.95] : [0.95, 0.35],
+                }),
+              }]} />
+            ))}
+          </View>
+          <Text style={o.vdockLabel}>
+            NANO  ·  {phase === "speaking" ? "SPEAKING" : phase === "thinking" ? "THINKING" : "LISTENING"}
+          </Text>
+          <Pressable onPress={() => setStage(false)} hitSlop={12}>
+            <Text style={{ color: "#8A87A3", fontSize: 16 }}>✕</Text>
+          </Pressable>
+        </View>
+        {transcript ? (
+          <Text style={o.vdockHeard} numberOfLines={1}>“{transcript}”</Text>
+        ) : null}
         {capWords.length ? (
-          <Text style={o.stageCaption}>{capWords.slice(0, capN + 1).join(" ")}</Text>
-        ) : (
-          <>
-            <Text style={o.stageState}>
-              {phase === "speaking" ? "SPEAKING" : phase === "thinking" ? "·  ·  ·" : "LISTENING"}
-            </Text>
-            {transcript ? <Text style={o.stageHeard}>{transcript}</Text> : null}
-          </>
-        )}
+          <Text style={o.vdockCaption}>
+            <Text style={o.capSaid}>{capWords.slice(0, capN + 1).join(" ")}</Text>
+            {capN + 1 < capWords.length ? (
+              <Text style={o.capRest}> {capWords.slice(capN + 1).join(" ")}</Text>
+            ) : null}
+          </Text>
+        ) : !transcript ? (
+          <Text style={o.vdockHint}>Say it — I'm listening.</Text>
+        ) : null}
       </View>
     ) : null}
     <View pointerEvents="box-none" style={[o.dock, { top: insets.top + 64 }]}>
@@ -458,31 +470,35 @@ export function NanoOrb({
 }
 
 const o = StyleSheet.create({
-  stage: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(4,4,10,0.97)",
-    alignItems: "center",
-    paddingTop: 130,
-    paddingHorizontal: 30,
+  vdock: {
+    position: "absolute",
+    left: 12, right: 12, bottom: 24,
+    backgroundColor: "rgba(14,12,24,0.98)",
+    borderWidth: 1, borderColor: "rgba(199,184,255,0.16)",
+    borderRadius: 22,
+    paddingHorizontal: 18, paddingVertical: 14,
     zIndex: 60,
+    shadowColor: "#000", shadowOpacity: 0.5, shadowRadius: 24,
+    shadowOffset: { width: 0, height: 8 },
   },
-  stageClose: { position: "absolute", top: 26, right: 26 },
-  stageOrb: {
-    width: 92, height: 92, borderRadius: 46,
-    shadowColor: "#C7B8FF", shadowOpacity: 0.85, shadowRadius: 28,
-    shadowOffset: { width: 0, height: 0 },
+  vdockHead: { flexDirection: "row", alignItems: "center", gap: 10 },
+  waveRow: { flexDirection: "row", alignItems: "center", gap: 2.5, height: 18 },
+  waveBar: { width: 2.5, borderRadius: 2, backgroundColor: "#C7B8FF" },
+  vdockLabel: {
+    flex: 1,
+    fontFamily: "JetBrainsMono_400Regular", fontSize: 10, letterSpacing: 3,
+    color: "#8A87A3", marginLeft: 4,
   },
-  stageState: {
-    fontFamily: "JetBrainsMono_400Regular", fontSize: 12, letterSpacing: 4,
-    color: "#8A87A3", marginTop: 34,
+  vdockHeard: {
+    fontFamily: "InstrumentSans_400Regular", fontSize: 13,
+    color: "#8A87A3", marginTop: 10,
   },
-  stageHeard: {
-    fontFamily: "InstrumentSerif_400Regular", fontSize: 22, lineHeight: 30,
-    color: "#C7B8FF", marginTop: 16, textAlign: "center",
-  },
-  stageCaption: {
-    fontFamily: "InstrumentSerif_400Regular", fontSize: 28, lineHeight: 38,
-    color: "#F4F2FA", marginTop: 30, textAlign: "center",
+  vdockCaption: { marginTop: 8, fontSize: 19, lineHeight: 27 },
+  capSaid: { fontFamily: "InstrumentSans_600SemiBold", color: "#F4F2FA" },
+  capRest: { fontFamily: "InstrumentSans_400Regular", color: "rgba(244,242,250,0.32)" },
+  vdockHint: {
+    fontFamily: "InstrumentSans_400Regular", fontSize: 14,
+    color: "#8A87A3", marginTop: 10,
   },
   dock: {
     position: "absolute",
