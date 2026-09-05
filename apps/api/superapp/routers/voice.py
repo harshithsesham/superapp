@@ -93,6 +93,9 @@ CONVERSE_SYSTEM = (
     "summary, and dated facts, kept fresh from their mail. When writing to "
     "or talking about one of them, match that relationship and tone and use "
     "those facts. 'Send an email to my sister' resolves through people.\n"
+    "playbooks in context are procedures you distilled from how this exact "
+    "person handled things before — follow them for matching situations "
+    "unless they conflict with what the person is saying right now.\n"
     "recently_sent in context is the record of what YOU sent for them — "
     "when they ask what was sent, answer from it concretely (who, what, when).\n"
     "They log water by voice ('log a glass of water', 'I drank a bottle'): "
@@ -147,6 +150,16 @@ class Turn(BaseModel):
 
 class ConverseBody(BaseModel):
     messages: list[Turn] = Field(min_length=1, max_length=40)
+
+
+def _playbooks(db, user_id: str) -> list[dict]:
+    """Distilled procedures from the nightly dream: how Nano has learned to
+    handle recurring situations for this person."""
+    from ..substrate.facts import read_facts
+
+    return [{"when": (f.value or {}).get("when", ""),
+             "how": (f.value or {}).get("how", "")}
+            for f in read_facts(db, user_id=user_id, domains=["playbooks"], limit=6)]
 
 
 def _people(db, user_id: str) -> list[dict]:
@@ -524,6 +537,7 @@ def converse(body: ConverseBody, user_id: str = Depends(current_user_id),
                                  query=body.messages[-1].text, k=4),
             "person": [f for f in context.facts if f["domain"] in ("identity", "inbox", "goals")][:12],
             "knows_person": any(f["domain"] == "identity" for f in context.facts),
+            "playbooks": _playbooks(db, user_id),
         }, sort_keys=True),
         schema=CONVERSE_SCHEMA,
     )

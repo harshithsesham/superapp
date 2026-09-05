@@ -54,6 +54,56 @@ REFLECT_SCHEMA = {
     "additionalProperties": False,
 }
 
+PLAYBOOK_SYSTEM = (
+    "You distill PROCEDURES, not beliefs: from this ledger of decisions and "
+    "events, find recurring situations the assistant handled the same way "
+    "more than once, and write each as a playbook — when it applies and "
+    "exactly how to handle it, including the user's observed preferences "
+    "(tone, timing, who gets what). Only procedures the evidence shows at "
+    "least twice; 0-2 per night; empty list is the normal answer. slug: "
+    "kebab-case, max 40 chars. when/how: one plain sentence each."
+)
+PLAYBOOK_SCHEMA = {
+    "type": "object",
+    "properties": {"playbooks": {"type": "array", "items": {
+        "type": "object",
+        "properties": {
+            "slug": {"type": "string"},
+            "when": {"type": "string"},
+            "how": {"type": "string"},
+            "confidence": {"type": "number"},
+        },
+        "required": ["slug", "when", "how", "confidence"],
+        "additionalProperties": False,
+    }}},
+    "required": ["playbooks"],
+    "additionalProperties": False,
+}
+
+CONSOLIDATE_SYSTEM = (
+    "You are tidying a belief store during sleep. Given reflected beliefs, "
+    "find groups that say the same thing (or where one supersedes another) "
+    "and merge each group: keep one key, fold the wording into one crisp "
+    "belief, list the keys to drop. Merge ONLY true near-duplicates; when in "
+    "doubt, leave beliefs alone. Empty list is the normal answer."
+)
+CONSOLIDATE_SCHEMA = {
+    "type": "object",
+    "properties": {"merges": {"type": "array", "items": {
+        "type": "object",
+        "properties": {
+            "domain": {"type": "string"},
+            "keep_key": {"type": "string"},
+            "merged_belief": {"type": "string"},
+            "drop_keys": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["domain", "keep_key", "merged_belief", "drop_keys"],
+        "additionalProperties": False,
+    }}},
+    "required": ["merges"],
+    "additionalProperties": False,
+}
+
 
 def _decay(db: Session, user_id: str, result: ThinkResult) -> int:
     """Inferred beliefs age: -10% confidence past 30 days, archived under 0.3.
@@ -237,6 +287,126 @@ def _heartbeat(db: Session, context: ContextSlice, result: ThinkResult) -> Think
     return result
 
 
+def _dream(db: Session, context: ContextSlice, result: ThinkResult) -> dict:
+    """Sleep-time consolidation (Nano 2.0 Phase C): merge near-duplicate
+    reflected beliefs, distill procedural playbooks from the decision
+    ledger, and prune long-settled mail rows (their gists already live in
+    semantic memory). Cheap models, deterministic writes, one dream event."""
+    from ..models import Decision, InboxMessage, UserFact
+    from ..substrate.facts import write_fact
+
+    provider = LLMProvider()
+    report = {"consolidated": 0, "dropped_facts": 0, "playbooks": 0,
+              "pruned_messages": 0}
+
+    # 1. Consolidate reflected_* beliefs when they've piled up.
+    reflected = [f for f in db.scalars(select(UserFact).where(
+        UserFact.user_id == context.user_id,
+        UserFact.key.like("reflected_%")))]
+    if len(reflected) >= 6:
+        resp = provider.complete(
+            db, user_id=context.user_id, agent="orchestrator",
+            task="classification", system=CONSOLIDATE_SYSTEM,
+            prompt=json.dumps({"beliefs": [
+                {"domain": f.domain, "key": f.key,
+                 "belief": (f.value or {}).get("belief", ""),
+                 "confidence": f.confidence} for f in reflected[:30]],
+            }, sort_keys=True),
+            schema=CONSOLIDATE_SCHEMA,
+        )
+        if not (resp.stubbed or resp.refused):
+            try:
+                merges = json.loads(resp.text).get("merges", [])[:6]
+            except json.JSONDecodeError:
+                merges = []
+            by_key = {(f.domain, f.key): f for f in reflected}
+            fresh_keys = {(w.domain, w.key) for w in result.fact_writes}
+            for m in merges:
+                touched = [(m["domain"], m["keep_key"])] + [
+                    (m["domain"], k) for k in m.get("drop_keys", [])]
+                if any(t in fresh_keys for t in touched):
+                    continue  # tonight's reflection re-emitted it; leave alone
+                keep = by_key.get((m["domain"], m["keep_key"]))
+                drops = [by_key[(m["domain"], k)] for k in m.get("drop_keys", [])
+                         if (m["domain"], k) in by_key and k != m["keep_key"]]
+                if keep is None or not drops:
+                    continue
+                keep.value = {"belief": str(m["merged_belief"])[:500]}
+                keep.learned_at = datetime.now(timezone.utc)
+                for d in drops:
+                    result.event_writes.append(EventWrite(
+                        type="fact_consolidated", domain=d.domain,
+                        payload={"dropped_key": d.key, "into": keep.key,
+                                 "old_value": d.value}))
+                    db.delete(d)
+                    report["dropped_facts"] += 1
+                report["consolidated"] += 1
+
+    # 2. Distill playbooks from how decisions actually went.
+    decisions = list(db.scalars(select(Decision).where(
+        Decision.user_id == context.user_id)
+        .order_by(Decision.created_at.desc()).limit(50)))
+    if len(decisions) >= 6:
+        resp = provider.complete(
+            db, user_id=context.user_id, agent="orchestrator",
+            task="classification", system=PLAYBOOK_SYSTEM,
+            prompt=json.dumps({
+                "decisions": [{"action": d.action_key, "by": d.decided_by,
+                               "verdict": d.verdict,
+                               "detail": {k: str(v)[:80] for k, v in
+                                          (d.payload or {}).items()}}
+                              for d in decisions],
+                "recent_events": context.recent_events[:30],
+                "existing_playbooks": [
+                    {"slug": f.key, "when": (f.value or {}).get("when", "")}
+                    for f in db.scalars(select(UserFact).where(
+                        UserFact.user_id == context.user_id,
+                        UserFact.domain == "playbooks"))],
+            }, sort_keys=True, default=str),
+            schema=PLAYBOOK_SCHEMA,
+        )
+        if not (resp.stubbed or resp.refused):
+            try:
+                books = json.loads(resp.text).get("playbooks", [])[:2]
+            except json.JSONDecodeError:
+                books = []
+            for b in books:
+                slug = str(b["slug"])[:40].strip().lower() or "unnamed"
+                try:
+                    write_fact(db, user_id=context.user_id, domain="playbooks",
+                               key=slug,
+                               value={"when": str(b["when"])[:200],
+                                      "how": str(b["how"])[:400]},
+                               confidence=min(0.9, max(0.4, float(b["confidence"]))),
+                               source_agent="orchestrator")
+                    report["playbooks"] += 1
+                except (ValueError, TypeError):
+                    continue  # oversized or malformed playbook: drop it
+        # Keep the shelf small: lowest-confidence beyond 8 falls off.
+        shelf = list(db.scalars(select(UserFact).where(
+            UserFact.user_id == context.user_id,
+            UserFact.domain == "playbooks")))
+        if len(shelf) > 8:
+            for f in sorted(shelf, key=lambda f: (f.confidence, f.learned_at))[:len(shelf) - 8]:
+                db.delete(f)
+
+    # 3. Prune long-settled mail by blanking the heavy text — the row (and
+    # its gmail_msg_id) stays, so backfill dedupe never re-ingests it; the
+    # gist already lives in memory_chunks.
+    cutoff = datetime.now(timezone.utc) - timedelta(days=21)
+    old_rows = list(db.scalars(select(InboxMessage).where(
+        InboxMessage.user_id == context.user_id,
+        InboxMessage.tier.in_(("cleared", "receipt")),
+        InboxMessage.body_text != "",
+        InboxMessage.created_at < cutoff).limit(200)))
+    for m in old_rows:
+        m.body_text = ""
+    report["pruned_messages"] = len(old_rows)
+
+    result.event_writes.append(EventWrite(type="dream", payload=report))
+    return report
+
+
 def orchestrator_think(db: Session, *, trigger: dict, context: ContextSlice,
                        run_id: str) -> ThinkResult:
     result = ThinkResult()
@@ -282,8 +452,14 @@ def orchestrator_think(db: Session, *, trigger: dict, context: ContextSlice,
 
     remembered = _remember_day(db, context)
     decayed = _decay(db, context.user_id, result)
+    try:
+        dream = _dream(db, context, result)
+    except Exception as exc:  # noqa: BLE001 — dreaming must never kill the night
+        dream = {"error": str(exc)[:200]}
+        result.event_writes.append(EventWrite(type="dream", payload=dream))
     result.event_writes.append(EventWrite(
-        type="reflection_run", payload={"remembered": remembered, "decayed": decayed}))
+        type="reflection_run", payload={"remembered": remembered, "decayed": decayed,
+                                        "dream": dream}))
 
     if trigger.get("kind") == "morning":
         send_push(db, user_id=context.user_id, title="Nano — your morning",

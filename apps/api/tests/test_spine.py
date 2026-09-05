@@ -1202,3 +1202,144 @@ def test_injection_tripwire_blocks_autonomy():
     assert not assess("inbox.archive_noise", provenance="email",
                       suspicious=True).allowed
 
+
+def test_whatsapp_webhook_gateway(monkeypatch):
+    """Twilio gateway: secret-guarded webhook, unpaired hint, paired chat
+    flows through the converse brain — mirror of the Telegram gateway."""
+    import superapp.config as config_module
+    import superapp.routers.whatsapp as wa_module
+
+    class _FakeResp:
+        status_code = 201
+
+    monkeypatch.setattr(wa_module.httpx, "post", lambda *a, **k: _FakeResp())
+    settings = config_module.get_settings()
+    settings.twilio_account_sid = "ACtest"
+    settings.twilio_auth_token = "wa-test-token"
+    settings.twilio_whatsapp_from = "whatsapp:+15550000000"
+    settings.whatsapp_chats = "+15551234567:harshith"
+    saved_base = settings.scout_public_base
+    settings.scout_public_base = ""  # signature off for the plain-ack checks
+    try:
+        import hashlib
+        secret = hashlib.sha256(b"wa:wa-test-token").hexdigest()[:24]
+        # Wrong secret is rejected.
+        assert client.post("/v1/whatsapp/webhook/wrong",
+                           data={"From": "whatsapp:+15551234567",
+                                 "Body": "hi"}).status_code == 403
+        # Unpaired number gets a pairing hint; webhook acks with TwiML.
+        r = client.post(f"/v1/whatsapp/webhook/{secret}",
+                        data={"From": "whatsapp:+19998887777", "Body": "hello"})
+        assert r.status_code == 200 and b"<Response/>" in r.content
+        # Paired number flows through the converse brain (stubbed) and acks.
+        r = client.post(f"/v1/whatsapp/webhook/{secret}",
+                        data={"From": "whatsapp:+15551234567",
+                              "Body": "what needs me?"})
+        assert r.status_code == 200 and b"<Response/>" in r.content
+        # With a public base configured, the signature becomes REQUIRED:
+        # a bad one is rejected, and so is omitting the header entirely.
+        settings.scout_public_base = "https://example.test"
+        r = client.post(f"/v1/whatsapp/webhook/{secret}",
+                        data={"From": "whatsapp:+15551234567", "Body": "hey"},
+                        headers={"X-Twilio-Signature": "bm90LXJlYWw="})
+        assert r.status_code == 403
+        r = client.post(f"/v1/whatsapp/webhook/{secret}",
+                        data={"From": "whatsapp:+15551234567", "Body": "hey"})
+        assert r.status_code == 403
+        # And a correctly signed request passes.
+        import base64 as _b64
+        import hmac as _hmac
+        url = f"https://example.test/v1/whatsapp/webhook/{secret}"
+        params = {"From": "whatsapp:+15551234567", "Body": "hey"}
+        payload = url + "".join(k + v for k, v in sorted(params.items()))
+        good = _b64.b64encode(_hmac.new(b"wa-test-token", payload.encode(),
+                                        hashlib.sha1).digest()).decode()
+        r = client.post(f"/v1/whatsapp/webhook/{secret}", data=params,
+                        headers={"X-Twilio-Signature": good})
+        assert r.status_code == 200
+    finally:
+        settings.twilio_account_sid = ""
+        settings.twilio_auth_token = ""
+        settings.twilio_whatsapp_from = ""
+        settings.whatsapp_chats = ""
+        settings.scout_public_base = saved_base
+
+
+def test_dream_consolidation_and_playbooks():
+    """The nightly dream: prunes long-settled mail, reports a dream event,
+    and distilled playbooks reach the converse prompt without breaking it."""
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from superapp.models import InboxMessage, utcnow
+    from superapp.substrate.facts import write_fact
+
+    db = SessionLocal()
+    # An old cleared message that should be pruned by the dream.
+    stale = InboxMessage(user_id="harshith", account_email="h@x.com",
+                         gmail_msg_id="dream-stale-1", thread_id="t-dream",
+                         from_name="Shop", from_addr="promo@shop.example",
+                         subject="old promo", body_text="expired sale",
+                         tier="cleared", received_at=utcnow())
+    db.add(stale)
+    db.flush()
+    stale.created_at = utcnow() - timedelta(days=30)
+    # A distilled playbook, as the dream would write it.
+    write_fact(db, user_id="harshith", domain="playbooks",
+               key="recruiter-pings",
+               value={"when": "a recruiter asks for a call",
+                      "how": "decline warmly, mention happy where I am"},
+               confidence=0.8, source_agent="orchestrator")
+    db.commit()
+
+    r = client.post("/v1/agents/orchestrator/think?kind=nightly",
+                    headers=AUTH).json()
+    assert r["agent"] == "orchestrator"
+    db.expire_all()
+    pruned = db.scalar(select(InboxMessage).where(
+        InboxMessage.gmail_msg_id == "dream-stale-1"))
+    # The row survives (backfill dedupe depends on it); the heavy text goes.
+    assert pruned is not None and pruned.body_text == ""
+    dreams = recent_events(db, user_id="harshith", limit=15, types=["dream"])
+    assert dreams and dreams[0].payload["pruned_messages"] >= 1
+    db.close()
+
+    # Playbooks ride into converse without breaking the voice loop.
+    r = client.post("/v1/voice/converse", headers=AUTH, json={"messages": [
+        {"role": "user", "text": "hello there"}]})
+    assert r.status_code == 200 and r.json()["say"]
+
+
+def test_liveactivity_token_registration_and_task_hooks():
+    """Push-to-start tokens store as system facts; the task lifecycle's
+    Live Activity hooks are silent no-ops without APNs configured."""
+    import superapp.config as config_module
+    from superapp.substrate.facts import read_facts
+
+    settings = config_module.get_settings()
+    settings.worker_token = "wk-test-token"
+    W = {"Authorization": "Bearer wk-test-token"}
+    try:
+        assert client.post("/v1/devices/push-token", headers=AUTH, json={
+            "token": "d" * 64, "kind": "liveactivity_start"}).json()["ok"]
+        assert client.post("/v1/devices/push-token", headers=AUTH, json={
+            "token": "e" * 64, "kind": "liveactivity_update"}).json()["ok"]
+        db = SessionLocal()
+        keys = {f.key for f in read_facts(db, user_id="harshith",
+                                          domains=["system"], limit=20)}
+        assert {"liveactivity_start_token", "liveactivity_update_token"} <= keys
+        db.close()
+
+        # Claim + complete a task: the hooks run (no APNs key -> no-op) and
+        # the worker contract is unchanged.
+        t = client.post("/v1/tasks", headers=AUTH, json={
+            "instruction": "scout something to light the lock screen"}).json()
+        nxt = client.get("/v1/tasks/next", headers=W).json()["task"]
+        assert nxt["id"] == t["id"]
+        r = client.post(f"/v1/tasks/{t['id']}/complete", headers=W, json={
+            "result": {"summary": "done", "caveats": "", "shortlist": []}})
+        assert r.json()["ok"]
+    finally:
+        settings.worker_token = ""
+

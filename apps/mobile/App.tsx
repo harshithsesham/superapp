@@ -294,6 +294,10 @@ function App() {
     if (authState !== "ready") return;
     (async () => {
       try {
+        // Live Activity tokens don't need notification permission — register
+        // the relay first so the lock screen works even if alerts are off.
+        NativeModules.NanoWidgetBridge?.registerLiveActivityTokens(
+          apiUrl, AUTH.Authorization);
         const perm = await Notifications.requestPermissionsAsync();
         if (!perm.granted) return;
         const device = await Notifications.getDevicePushTokenAsync();
@@ -304,6 +308,7 @@ function App() {
           headers: { ...AUTH, "Content-Type": "application/json" },
           body: JSON.stringify({ token, kind: "apns" }),
         });
+
       } catch {
         // no push in this environment (simulator, denied permission); fine
       }

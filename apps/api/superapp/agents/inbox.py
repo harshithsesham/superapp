@@ -99,6 +99,8 @@ DRAFT_SYSTEM = (
     "commas and periods only. No bullet points, no headers, no stray "
     "mid-sentence line breaks; a blank line between paragraphs only. "
     "Greeting on its own line, body, then the name. "
+    "playbooks, when present, are procedures learned from this user's past "
+    "replies to similar situations — follow them. "
     "Output only the reply body."
 )
 
@@ -189,6 +191,8 @@ def _verify_clear(db: Session, context: ContextSlice, provider: LLMProvider, msg
 
 
 def _draft_reply(db: Session, context: ContextSlice, provider: LLMProvider, msg) -> str:
+    from ..substrate.facts import read_facts as _read_facts
+
     style = _fact(context, "reply_style")
     # Who the user IS — without this the model invents a signature name.
     # Overridable via the inbox/signature_name fact; defaults to the user id.
@@ -202,6 +206,10 @@ def _draft_reply(db: Session, context: ContextSlice, provider: LLMProvider, msg)
             "email": {"from_name": msg.from_name, "subject": msg.subject, "body": msg.body_text[:6000]},
             "reply_style_notes": (style or {}).get("notes", ""),
             "user_facts": [f for f in context.facts if f["domain"] in ("goals", "identity")],
+            "playbooks": [{"when": (f.value or {}).get("when", ""),
+                           "how": (f.value or {}).get("how", "")}
+                          for f in _read_facts(db, user_id=context.user_id,
+                                               domains=["playbooks"], limit=6)],
         }, sort_keys=True),
     )
     if resp.stubbed or resp.refused:

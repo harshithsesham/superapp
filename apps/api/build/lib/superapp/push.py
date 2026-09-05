@@ -36,8 +36,7 @@ def _pushes_today(db: Session, user_id: str) -> int:
 
 
 def live_activity(db: Session, *, user_id: str, event: str, state: dict,
-                  title: str | None = None, alert_title: str | None = None,
-                  alert_body: str | None = None) -> bool:
+                  title: str | None = None) -> bool:
     """Drive the lock-screen Live Activity from the server. Start uses the
     push-to-start token; update/end use the freshest per-activity update
     token the app reported. Silent no-op when no token or no APNs key —
@@ -49,8 +48,7 @@ def live_activity(db: Session, *, user_id: str, event: str, state: dict,
     token = _fact(db, user_id, key)
     if not token:
         return False
-    ok = send_liveactivity(token=token, event=event, state=state, title=title,
-                           alert_title=alert_title, alert_body=alert_body)
+    ok = send_liveactivity(token=token, event=event, state=state, title=title)
     append_event(db, user_id=user_id, type="live_activity", agent="scout",
                  payload={"event": event, "ok": ok})
     return ok

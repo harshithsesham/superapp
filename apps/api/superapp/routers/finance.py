@@ -125,13 +125,21 @@ async def plaid_webhook(token: str, request: Request, db: Session = Depends(get_
 
 class PushToken(BaseModel):
     token: str = Field(min_length=10, max_length=200)
-    kind: str = "expo"  # expo | apns
+    kind: str = "expo"  # expo | apns | liveactivity_start | liveactivity_update
 
 
 @router.post("/devices/push-token")
 def register_push_token(body: PushToken, user_id: str = Depends(current_user_id),
                         db: Session = Depends(get_db)):
-    key = "apns_device_token" if body.kind == "apns" else "expo_push_token"
+    key = {"apns": "apns_device_token",
+           "liveactivity_start": "liveactivity_start_token",
+           "liveactivity_update": "liveactivity_update_token",
+           }.get(body.kind, "expo_push_token")
+    if key != "expo_push_token":
+        import re as _re
+        # APNs tokens are hex; anything else would ride into the APNs URL path.
+        if not _re.fullmatch(r"[0-9a-fA-F]{16,200}", body.token):
+            raise HTTPException(status_code=422, detail="Not an APNs token")
     write_fact(db, user_id=user_id, domain="system", key=key,
                value={"token": body.token}, confidence=1.0, source_agent="user")
     db.commit()

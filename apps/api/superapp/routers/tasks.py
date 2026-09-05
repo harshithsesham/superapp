@@ -18,7 +18,7 @@ from ..config import get_settings
 from ..db import get_db
 from ..dispatcher import dispatch_tick, retry_or_fail, settle_campaign_check
 from ..models import AgentTask, Campaign, FlightWatch, utcnow
-from ..push import send_push
+from ..push import live_activity, send_push
 from ..substrate.events import append_event
 
 router = APIRouter(prefix="/v1/tasks", tags=["tasks"])
@@ -30,6 +30,19 @@ def _worker_auth(authorization: str = Header(default="")) -> None:
     if not (settings.worker_token
             and hmac.compare_digest(presented, settings.worker_token)):
         raise HTTPException(status_code=401, detail="Bad worker token")
+
+
+def _la_end(db: Session, user_id: str) -> None:
+    """End the lock-screen activity AFTER the transaction settled — the APNs
+    round-trip must never hold a DB transaction open."""
+    try:
+        live_activity(db, user_id=user_id, event="end",
+                      state={"status": "Done — the shortlist is in.",
+                             "stage": "Done — the shortlist is in.",
+                             "steps": ["Queued", "Searching", "Parsing", "Done"], "stepIndex": 3})
+        db.commit()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 class NewTask(BaseModel):
@@ -180,6 +193,18 @@ def next_task(db: Session = Depends(get_db)):
     task.status = "running"
     task.updated_at = utcnow()
     db.commit()
+    try:
+        # Push-to-start: the lock screen lights up even with the app closed.
+        live_activity(db, user_id=task.user_id, event="start",
+                      title=task.instruction[:44],
+                      state={"status": task.instruction[:80],
+                             "stage": "The scout is out on the open web.",
+                             "steps": ["Queued", "Searching", "Parsing", "Done"], "stepIndex": 1},
+                      alert_title="Nano — on it",
+                      alert_body=task.instruction[:100])
+        db.commit()
+    except Exception:  # noqa: BLE001
+        pass  # the worker's claim must never fail on push plumbing
     return {"task": {"id": task.id, "user_id": task.user_id, "kind": task.kind,
                      "instruction": task.instruction}}
 
@@ -213,10 +238,12 @@ def complete_task(task_id: str, body: TaskResult, db: Session = Depends(get_db))
     if task.watch_id:
         _settle_watch_check(db, task, body.result)
         db.commit()
+        _la_end(db, task.user_id)
         return {"ok": True}
     if task.campaign_id:
         settle_campaign_check(db, task, body.result, send_push)
         db.commit()
+        _la_end(db, task.user_id)
         return {"ok": True}
     n = len(body.result.get("shortlist", []))
     summary = str(body.result.get("summary", "")).strip()
@@ -230,6 +257,7 @@ def complete_task(task_id: str, body: TaskResult, db: Session = Depends(get_db))
                   body=(summary or f"Found {n} options for: {task.instruction[:80]}")[:170],
                   agent="scout")
     db.commit()
+    _la_end(db, task.user_id)
     return {"ok": True}
 
 
@@ -240,6 +268,20 @@ def fail_task(task_id: str, body: TaskError, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="No such task")
     status = retry_or_fail(db, task, body.error)
     db.commit()
+    try:
+        if status == "failed":
+            live_activity(db, user_id=task.user_id, event="end",
+                          state={"status": "That errand didn't land — I'll surface it.",
+                                 "stage": "Stopped.",
+                                 "steps": ["Queued", "Searching", "Parsing", "Done"], "stepIndex": 1})
+        elif status == "queued":
+            live_activity(db, user_id=task.user_id, event="update",
+                          state={"status": task.instruction[:80],
+                                 "stage": "Hit a snag — retrying shortly.",
+                                 "steps": ["Queued", "Searching", "Parsing", "Done"], "stepIndex": 1})
+        db.commit()
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, "status": status}
 
 
