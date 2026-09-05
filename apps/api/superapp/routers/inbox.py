@@ -277,11 +277,13 @@ def inbox_state(user_id: str = Depends(current_user_id), db: Session = Depends(g
 
     ar_fact = _autoreply_fact(db, user_id)
     auto_kinds = list((ar_fact.value or {}).get("kinds", [])) if ar_fact else []
+    auto_senders = list((ar_fact.value or {}).get("senders", [])) if ar_fact else []
 
     return {
         "connected": data.get("connected", False),
         "reauth": reauth,
         "auto_reply_kinds": auto_kinds,
+        "auto_reply_senders": auto_senders,
         "synced_at": last_sync.created_at.isoformat() if last_sync else None,
         "needs_reply": data.get("needs_reply", []),
         "worth_knowing": data.get("worth_knowing", []),
@@ -330,7 +332,8 @@ def dismiss_draft(draft_id: str, user_id: str = Depends(current_user_id),
 
 
 class AutoReplyBody(BaseModel):
-    kind: str = Field(min_length=3, max_length=120)
+    kind: str | None = Field(default=None, max_length=120)
+    sender: str | None = Field(default=None, max_length=320)
 
 
 def _as_map(v) -> dict:
@@ -357,6 +360,31 @@ def _fit(value: dict, limit: int = 900) -> dict:
     return value
 
 
+def set_auto_reply(db: Session, user_id: str, *, kind: str | None = None,
+                   sender: str | None = None, on: bool = True) -> dict:
+    """Turn auto-reply on/off for a KIND (a type of email) or a SENDER (a
+    specific person). Stored as validator-safe name->true maps. The single
+    place both the endpoint and the voice brain write this rule."""
+    from ..substrate.facts import write_fact
+    fact = _autoreply_fact(db, user_id)
+    kinds = _as_map(fact.value.get("kinds")) if fact and fact.value else {}
+    senders = _as_map(fact.value.get("senders")) if fact and fact.value else {}
+    if kind:
+        k = kind.strip()[:120]
+        kinds = {x: v for x, v in kinds.items() if x.lower() != k.lower()}
+        if on:
+            kinds[k] = True
+    if sender:
+        a = sender.strip().lower()[:320]
+        senders = {x: v for x, v in senders.items() if x.lower() != a}
+        if on:
+            senders[a] = True
+    value = _fit({"kinds": kinds, "senders": senders})
+    write_fact(db, user_id=user_id, domain="inbox", key="auto_reply_kinds",
+               value=value, confidence=1.0, source_agent="inbox")
+    return value
+
+
 def _autoreply_fact(db: Session, user_id: str):
     from sqlalchemy import select as _select
 
@@ -371,32 +399,23 @@ def add_autoreply(body: AutoReplyBody, user_id: str = Depends(current_user_id),
                   db: Session = Depends(get_db)):
     """Delegate one stream: future mail of this kind gets its reply sent.
     Every auto-reply surfaces under Worth knowing — never silent."""
-    from ..substrate.facts import write_fact
-    fact = _autoreply_fact(db, user_id)
-    kinds = _as_map(fact.value.get("kinds")) if fact and fact.value else {}
-    kinds[body.kind.strip()[:120]] = True
-    value = _fit({"kinds": kinds})
-    write_fact(db, user_id=user_id, domain="inbox", key="auto_reply_kinds",
-               value=value, confidence=1.0, source_agent="inbox")
+    if not body.kind and not body.sender:
+        raise HTTPException(status_code=422, detail="kind or sender required")
+    value = set_auto_reply(db, user_id, kind=body.kind, sender=body.sender)
     append_event(db, user_id=user_id, type="autoreply_enabled", agent="inbox",
-                 domain="inbox", payload={"kind": body.kind.strip()[:120]})
+                 domain="inbox", payload={"kind": body.kind or "", "sender": body.sender or ""})
     db.commit()
-    return {"ok": True, "kinds": list(value["kinds"])}
+    return {"ok": True, "kinds": list(value.get("kinds", {})),
+            "senders": list(value.get("senders", {}))}
 
 
 @router.delete("/inbox/autoreply")
 def remove_autoreply(body: AutoReplyBody, user_id: str = Depends(current_user_id),
                      db: Session = Depends(get_db)):
-    from ..substrate.facts import write_fact
-    fact = _autoreply_fact(db, user_id)
-    kinds = _as_map(fact.value.get("kinds")) if fact and fact.value else {}
-    target = body.kind.strip().lower()
-    kinds = {k: v for k, v in kinds.items() if k.lower() != target}
-    value = {"kinds": kinds}
-    write_fact(db, user_id=user_id, domain="inbox", key="auto_reply_kinds",
-               value=value, confidence=1.0, source_agent="inbox")
+    value = set_auto_reply(db, user_id, kind=body.kind, sender=body.sender, on=False)
     db.commit()
-    return {"ok": True, "kinds": list(kinds)}
+    return {"ok": True, "kinds": list(value.get("kinds", {})),
+            "senders": list(value.get("senders", {}))}
 
 
 class MuteBody(BaseModel):

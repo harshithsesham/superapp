@@ -1377,3 +1377,36 @@ def test_mute_and_autoreply_persist_without_validator_crash():
     kinds = client.get("/v1/inbox/state", headers=AUTH).json()["auto_reply_kinds"]
     assert "seat changes from airlines" not in kinds
 
+
+def test_sender_scoped_autoreply_and_chat_rule():
+    """Auto-reply can be delegated by SENDER, set from chat, and it matches on
+    the sender address (not just the kind)."""
+    from superapp.agents.inbox import _auto_reply_match
+
+    # By sender, via the endpoint.
+    r = client.post("/v1/inbox/autoreply", headers=AUTH,
+                    json={"sender": "priya@example.com"})
+    assert r.status_code == 200 and "priya@example.com" in r.json()["senders"]
+    st = client.get("/v1/inbox/state", headers=AUTH).json()
+    assert "priya@example.com" in st.get("auto_reply_senders", [])
+
+    db = SessionLocal()
+    # Matches on sender even with an unknown kind.
+    assert _auto_reply_match(db, "harshith", "some random kind", "priya@example.com")
+    assert not _auto_reply_match(db, "harshith", "some random kind", "stranger@example.com")
+    db.close()
+
+    # Set a sender rule from the chat brain (stub routes it to auto_reply_rule).
+    r = client.post("/v1/voice/converse", headers=AUTH, json={"messages": [
+        {"role": "user", "text": "auto reply to all emails from boss@example.com"}]}).json()
+    assert r["action"] == "auto_reply_rule" and r["acted"]
+    st = client.get("/v1/inbox/state", headers=AUTH).json()
+    assert "boss@example.com" in st.get("auto_reply_senders", [])
+
+    # And turn one off by chat.
+    r = client.post("/v1/voice/converse", headers=AUTH, json={"messages": [
+        {"role": "user", "text": "stop auto replying to boss@example.com"}]}).json()
+    assert r["action"] == "auto_reply_rule"
+    st = client.get("/v1/inbox/state", headers=AUTH).json()
+    assert "boss@example.com" not in st.get("auto_reply_senders", [])
+

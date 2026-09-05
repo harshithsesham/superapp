@@ -219,15 +219,22 @@ def _draft_reply(db: Session, context: ContextSlice, provider: LLMProvider, msg)
     return resp.text.strip()
 
 
-def _auto_reply_match(db: Session, user_id: str, kind: str) -> bool:
-    if not kind:
-        return False
+def _auto_reply_match(db: Session, user_id: str, kind: str,
+                      from_addr: str | None = None) -> bool:
+    """A message is auto-reply-delegated if its KIND was delegated, or the
+    SENDER was ('auto-reply to everything from Priya')."""
     from ..models import UserFact
     fact = db.scalar(select(UserFact).where(
         UserFact.user_id == user_id, UserFact.domain == "inbox",
         UserFact.key == "auto_reply_kinds"))
-    kinds = (fact.value or {}).get("kinds", []) if fact else []
-    return kind.strip().lower() in {k.lower() for k in kinds}
+    val = (fact.value or {}) if fact else {}
+    kinds = {str(k).lower() for k in val.get("kinds", [])}
+    senders = {str(a).lower() for a in val.get("senders", [])}
+    if kind and kind.strip().lower() in kinds:
+        return True
+    if from_addr and from_addr.strip().lower() in senders:
+        return True
+    return False
 
 
 def _flag_reauth(db: Session, user_id: str, email: str) -> None:
@@ -351,15 +358,24 @@ def _sync(db: Session, context: ContextSlice, trigger: dict) -> ThinkResult:
                               suspicious=msg.suspicious)
                 if (msg.gmail_msg_id not in backfill_ids
                         and settings.gmail_scope_tier in ("send", "modify")
-                        and _auto_reply_match(db, context.user_id, msg.note_kind)
+                        and _auto_reply_match(db, context.user_id, msg.note_kind, msg.from_addr)
                         and gate.allowed
                         and not draft_leaks_new_destination(
                             draft.body, msg.body_text,
                             allowed=f"{msg.from_addr} {msg.account_email}")):
+                    from ..push import live_activity as _la
+                    _la(db, user_id=context.user_id, event="start",
+                        title="Auto-reply",
+                        state={"status": f"Replying to {msg.from_name}",
+                               "stage": f"Replying to {msg.from_name}",
+                               "quoteLabel": "WHAT'S GOING OUT",
+                               "quote": draft.body[:140]})
                     try:
                         sent_id = client.send_reply(
                             to_addr=msg.from_addr, subject=msg.subject,
                             body=draft.body, thread_id=msg.thread_id)
+                        _la(db, user_id=context.user_id, event="end",
+                            state={"status": "Sent.", "stage": "Sent."})
                         from ..models import utcnow as _utcnow
                         draft.status = "sent"
                         draft.sent_at = _utcnow()
@@ -375,7 +391,10 @@ def _sync(db: Session, context: ContextSlice, trigger: dict) -> ThinkResult:
                                                  "risk_tier": gate.tier,
                                                  "provenance": "email"})
                     except Exception:  # noqa: BLE001
-                        pass  # send failed: the draft simply waits like any other
+                        # Send failed: the draft simply waits like any other —
+                        # but end the lock-screen activity so it can't linger.
+                        _la(db, user_id=context.user_id, event="end",
+                            state={"status": "Held for you.", "stage": "Held for you."})
             counts[msg.tier] += 1
             # Nano's own verdicts go in the ledger too — the "did without
             # asking" side of the autonomy panel is counted, never estimated.

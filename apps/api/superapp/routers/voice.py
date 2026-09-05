@@ -86,6 +86,15 @@ CONVERSE_SYSTEM = (
     "phrase reply_body starting 'keep checking' plus the goal — it becomes "
     "a standing campaign, re-run daily, pinging them only when the best "
     "find changes.\n"
+    "AUTO-REPLY RULES: when they ask you to auto-reply to a person or a type "
+    "of email ('auto reply to all emails from Priya', 'auto-reply to "
+    "newsletters from Substack', 'stop auto-replying to recruiters'), emit "
+    "action=auto_reply_rule. For a specific PERSON put their email in to_addr "
+    "(resolve it from people or inbox context — never invent an address; if "
+    "you don't have it, ask). For a TYPE of email put a short kind label in "
+    "reply_body. To turn one OFF, do the same and set subject='off'. Tell "
+    "them it only applies to FUTURE mail, that every auto-reply still surfaces "
+    "under Worth knowing, and that it is signed as them. Never retroactive.\n"
     "nutrition in context is their live day — plan targets, what they ate, "
     "kcal_left, water — answer calorie/macro/water questions from it with "
     "real numbers, never estimates of your own.\n"
@@ -127,7 +136,7 @@ CONVERSE_SCHEMA = {
                         "enum": ["none", "open_screen", "refresh_inbox", "start_interview",
                                  "draft_reply", "send_draft", "send_new_email",
                                  "set_nutrition", "log_water", "research_task",
-                                 "connect_site", "end_conversation"]},
+                                 "connect_site", "auto_reply_rule", "end_conversation"]},
         "screen": {"type": "string", "enum": ["hub", "inbox", "home", "finance", "stylist", "flights", ""]},
         "draft_id": {"type": "string"},
         "message_id": {"type": "string"},
@@ -242,6 +251,15 @@ def _stub_converse(user_text: str, voice_inbox: dict) -> dict:
     if "send" in t and asks and asks[0]["draft_id"]:
         return {**base, "action_type": "send_draft", "draft_id": asks[0]["draft_id"],
                 "say": "Sent."}
+    if "auto reply" in t or "auto-reply" in t or "autoreply" in t:
+        import re as _re
+        m = _re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", user_text)
+        off = "stop" in t or "turn off" in t or "don't" in t or "do not" in t
+        return {**base, "action_type": "auto_reply_rule",
+                "to_addr": m.group(0) if m else "",
+                "reply_body": "" if m else user_text[:120],
+                "subject": "off" if off else "",
+                "say": "Done." }
     if any(w in t for w in ("keep an eye", "keep looking", "keep checking",
                             "scout", "find me", "search for", "look for",
                             "stop all")):
@@ -294,6 +312,29 @@ def _execute(db: Session, user_id: str, parsed: dict) -> dict:
         append_event(db, user_id=user_id, type="nutrition_plan_set", agent="orb",
                      domain="nutrition", payload={k: plan[k] for k in ("kcal", "goal")})
         return {}
+    if action == "auto_reply_rule":
+        from ..routers.inbox import set_auto_reply
+        addr = (parsed.get("to_addr") or "").strip()
+        kind = (parsed.get("reply_body") or "").strip()
+        on = (parsed.get("subject") or "").strip().lower() != "off"
+        if not addr and not kind:
+            return {"say": "Tell me who to auto-reply to, or what kind of email."}
+        if addr and ("@" not in addr or " " in addr):
+            return {"say": "I don't have a real address for them yet. What is it?"}
+        set_auto_reply(db, user_id, kind=kind or None, sender=addr or None, on=on)
+        who = addr or kind
+        record_decision(db, user_id=user_id, agent="inbox",
+                        action_key="inbox.auto_reply_rule", decided_by="user",
+                        verdict="accepted" if on else "rejected",
+                        payload={"sender": addr, "kind": kind, "on": on})
+        if not on:
+            return {"say": f"Done, I've turned auto-reply off for {who}."}
+        if addr:
+            return {"say": f"Done. From now on I answer emails from {who} myself, "
+                           "signed as you, and every one lands under Worth knowing. "
+                           "Only future mail, never the ones already here."}
+        return {"say": f"Done. I'll auto-reply to {who} from now on, signed as you, "
+                       "and surface each under Worth knowing."}
     if action == "connect_site" and parsed.get("reply_body"):
         from ..models import AgentTask
         site = parsed["reply_body"].strip().lower()[:40]
@@ -569,7 +610,7 @@ def converse(body: ConverseBody, user_id: str = Depends(current_user_id),
         "say": parsed["say"], "action": parsed["action_type"],
         "screen": parsed.get("screen", ""), "listen": parsed.get("listen", False),
         "acted": parsed["action_type"] in ("draft_reply", "send_draft", "send_new_email",
-                                           "set_nutrition", "log_water"),
+                                           "set_nutrition", "log_water", "auto_reply_rule"),
     }
 
 
