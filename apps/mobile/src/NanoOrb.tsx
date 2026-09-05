@@ -32,6 +32,7 @@ export type DockContext = {
   draftId?: string;     // decision: defer / dismiss target
   noteId?: string;      // note: settle target
   why?: string;         // note: why it surfaced
+  onResolved?: () => void; // drop the card once an action clears it
 };
 
 type Chip = { key: string; label: string; run: () => void };
@@ -539,9 +540,13 @@ export function NanoOrb({
     }
   }, [apiUrl, auth, ctx, draft, onActed, onNavigate, onRefreshInbox]);
 
-  // A contextual chip: do the real thing, then Nano confirms in its own words.
+  // A contextual chip: do the real thing, then Nano confirms in its own
+  // words. `remove` drops the card it was about — muting, holding and
+  // dismissing all take the item off the list right away.
   const ctxAct = useCallback(
-    async (confirm: string, req: { path: string; method?: string; body?: object } | null) => {
+    async (confirm: string, req: { path: string; method?: string; body?: object } | null,
+           remove = false) => {
+      if (remove) ctx?.onResolved?.();
       setChatReply(null);
       setChatWork("applying it across your inbox");
       try {
@@ -557,7 +562,7 @@ export function NanoOrb({
       setChatReply(confirm);
       onActed?.();
     },
-    [apiUrl, auth, onActed]
+    [apiUrl, auth, ctx, onActed]
   );
 
   // The chips Nano offers for the held item — the old Alert options, now
@@ -569,26 +574,26 @@ export function NanoOrb({
       return [
         { key: "mute-sender", label: "Do not reply to this sender", run: () => ctxAct(
           `${ctx.label} comes straight to you from now on. I won't draft for them again.`,
-          ctx.fromAddr ? { path: "/v1/inbox/mute", body: { sender: ctx.fromAddr } } : null) },
+          ctx.fromAddr ? { path: "/v1/inbox/mute", body: { sender: ctx.fromAddr } } : null, true) },
         ...(ctx.kind ? [{ key: "auto", label: "Auto-reply to these next time", run: () => ctxAct(
           "Done. I answer this kind myself from now on, signed as mine, and it lands under Worth knowing.",
           { path: "/v1/inbox/autoreply", body: { kind: ctx.kind } }) }] : []),
         ...(ctx.draftId ? [{ key: "hold", label: "Hold it until 6pm", run: () => ctxAct(
           "Held. I raise it once at 6pm and once tomorrow morning, then it's yours.",
           { path: `/v1/inbox/drafts/${ctx.draftId}/defer`,
-            body: { tz_offset_minutes: new Date().getTimezoneOffset() } }) }] : []),
+            body: { tz_offset_minutes: new Date().getTimezoneOffset() } }, true) }] : []),
         ...(ctx.draftId ? [{ key: "never", label: "Never chase me about this", run: () => ctxAct(
           "No more reminders on this one. It stays in the Hub and I stay quiet.",
-          { path: `/v1/inbox/drafts/${ctx.draftId}/dismiss` }) }] : []),
+          { path: `/v1/inbox/drafts/${ctx.draftId}/dismiss` }, true) }] : []),
       ];
     }
     return [
       ...(ctx.kind ? [{ key: "mute-kind", label: "Do not show me these again", run: () => ctxAct(
         `Gone. ${Kind} won't reach you again.`,
-        { path: "/v1/inbox/mute", body: { kind: ctx.kind } }) }] : []),
+        { path: "/v1/inbox/mute", body: { kind: ctx.kind } }, true) }] : []),
       { key: "mute-sender", label: "Never from this sender", run: () => ctxAct(
         `Nothing from ${ctx.label} will surface again. It still files, it just never speaks.`,
-        ctx.fromAddr ? { path: "/v1/inbox/mute", body: { sender: ctx.fromAddr } } : null) },
+        ctx.fromAddr ? { path: "/v1/inbox/mute", body: { sender: ctx.fromAddr } } : null, true) },
       ...(ctx.kind ? [{ key: "auto", label: "Auto-reply to these next time", run: () => ctxAct(
         "Done. I answer this kind myself from now on and summarise it for you after.",
         { path: "/v1/inbox/autoreply", body: { kind: ctx.kind } }) }] : []),

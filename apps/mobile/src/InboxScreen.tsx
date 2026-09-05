@@ -121,6 +121,7 @@ export function InboxScreen({
   const [sentLocal, setSentLocal] = useState<Set<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
   const alive = useRef(true);
+  const resolvedIds = useRef<Set<string>>(new Set());
 
   const refresh = useCallback(async () => {
     try {
@@ -163,6 +164,19 @@ export function InboxScreen({
     } catch { /* refresh reconciles */ }
   }, [apiUrl, auth]);
 
+  // Local-only removal after Nano resolves a card from the dock (the server
+  // mute/dismiss already ran there). The card leaves the list immediately.
+  const dropNote = useCallback((id: string) => {
+    resolvedIds.current.add(id);
+    setState((st) => st ? { ...st, worth_knowing: st.worth_knowing.filter((n) => n.id !== id) } : st);
+    setTimeout(refresh, 1500);
+  }, [refresh]);
+  const dropAsk = useCallback((id: string) => {
+    resolvedIds.current.add(id);
+    setState((st) => st ? { ...st, needs_reply: st.needs_reply.filter((a) => a.id !== id) } : st);
+    setTimeout(refresh, 1500);
+  }, [refresh]);
+
   const toggleAutoReply = useCallback(async (kind: string, active: boolean) => {
     try {
       await fetch(`${apiUrl}/v1/inbox/autoreply`, {
@@ -193,10 +207,11 @@ export function InboxScreen({
     } catch { /* ignore */ }
   }, [apiUrl, auth, refresh]);
 
-  const asks = state?.needs_reply ?? [];
+  const asks = (state?.needs_reply ?? []).filter((a) => !resolvedIds.current.has(a.id));
   const openAsks = asks.filter((a) => !a.draft?.deferred);
-  const autoNotes = (state?.worth_knowing ?? []).filter((n) => n.draft?.status === "sent");
-  const plainNotes = (state?.worth_knowing ?? []).filter((n) => n.draft?.status !== "sent");
+  const notes = (state?.worth_knowing ?? []).filter((n) => !resolvedIds.current.has(n.id));
+  const autoNotes = notes.filter((n) => n.draft?.status === "sent");
+  const plainNotes = notes.filter((n) => n.draft?.status !== "sent");
 
   return (
     <View style={s.backdrop}>
@@ -272,6 +287,7 @@ export function InboxScreen({
                                onLongPress={() => onLongPressItem?.({
                                  type: "decision", label: a.from_name, kind: a.kind || undefined,
                                  fromAddr: a.from_addr, draftId: a.draft?.id,
+                                 onResolved: () => dropAsk(a.id),
                                })} delayLongPress={350}>
                       <LinearGradient colors={TILES[i % TILES.length]}
                                       start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.tile}>
@@ -363,7 +379,7 @@ export function InboxScreen({
                   <View style={s.autoNote}>
                     <Pressable style={s.autoNoteHead}
                                onPress={() => setOpenNote(open ? null : n.id)}
-                               onLongPress={() => onLongPressItem?.({ type: "note", label: n.from_name, kind: n.kind || undefined, fromAddr: n.from_addr, noteId: n.id, why: n.gist })} delayLongPress={350}>
+                               onLongPress={() => onLongPressItem?.({ type: "note", label: n.from_name, kind: n.kind || undefined, fromAddr: n.from_addr, noteId: n.id, why: n.gist, onResolved: () => dropNote(n.id) })} delayLongPress={350}>
                       <Text style={{ color: "rgba(124,247,196,0.8)", fontSize: 12, marginTop: 2 }}>{"«"}</Text>
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
@@ -409,7 +425,7 @@ export function InboxScreen({
                 <SwipeRow key={n.id} onDismiss={() => settleNote(n.id)}>
                   <Pressable style={s.note}
                              onPress={() => setOpenNote(open ? null : n.id)}
-                             onLongPress={() => onLongPressItem?.({ type: "note", label: n.from_name, kind: n.kind || undefined, fromAddr: n.from_addr, noteId: n.id, why: n.gist })} delayLongPress={350}>
+                             onLongPress={() => onLongPressItem?.({ type: "note", label: n.from_name, kind: n.kind || undefined, fromAddr: n.from_addr, noteId: n.id, why: n.gist, onResolved: () => dropNote(n.id) })} delayLongPress={350}>
                     <View style={s.noteDot} />
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={s.noteFrom}>{n.from_name}</Text>

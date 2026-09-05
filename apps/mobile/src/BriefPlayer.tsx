@@ -1,10 +1,15 @@
 // The morning briefing, played: a full-screen story-style walkthrough of the
 // inbox — segment by segment, spoken aloud with a live caption — built to
-// match Nano V1 (6) exactly: progress bars, agent chip, voice toggle, the
-// pulsing orb with a typing caption, and the show/next pill pair.
+// match Nano V1 (6). It's a CONVERSATION, not a dictation: Nano reads a
+// segment, then listens. Say "next" to move on, or ask it anything and it
+// answers in Nano's voice before handing the floor back.
 import { LinearGradient } from "expo-linear-gradient";
-import { useAudioPlayer } from "expo-audio";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
+import {
+  ExpoSpeechRecognitionModule,
+  useSpeechRecognitionEvent,
+} from "expo-speech-recognition";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator, Animated, Easing, Pressable, ScrollView, StyleSheet,
   Text, View,
@@ -45,9 +50,19 @@ export function BriefPlayer({
   const [voiceOn, setVoiceOn] = useState(true);
   const [capN, setCapN] = useState(0);
   const [sayUrl, setSayUrl] = useState<string | null>(null);
+  const [phase, setPhase] = useState<"speaking" | "listening" | "thinking">("speaking");
+  const [heard, setHeard] = useState("");
+  const [spoken, setSpoken] = useState<{ text: string; id: string; isAnswer: boolean } | null>(null);
+  const [timedWords, setTimedWords] = useState<{ w: string; t: number }[] | null>(null);
   const capTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const listenOn = useRef(false);
+  const finalRef = useRef("");
+  const finishedFor = useRef("");
+  const chatHist = useRef<{ role: "user" | "nano"; text: string }[]>([]);
+  const handleRef = useRef<(t: string) => void>(() => {});
   const pulse = useRef(new Animated.Value(1)).current;
   const player = useAudioPlayer(sayUrl ? { uri: sayUrl, headers: auth } : null);
+  const status = useAudioPlayerStatus(player);
 
   useEffect(() => {
     const loop = Animated.loop(Animated.sequence([
@@ -120,75 +135,171 @@ export function BriefPlayer({
 
   const seg = segments?.[idx];
 
-  // Captions lock to the audio: word timings come from the same TTS
-  // synthesis (speak_timed), so text and voice can never drift. Falls back
-  // to a steady reveal when timings are unavailable.
-  const wordTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const [timedWords, setTimedWords] = useState<{ w: string; t: number }[] | null>(null);
+  const stopListening = useCallback(() => {
+    listenOn.current = false;
+    try { ExpoSpeechRecognitionModule.stop(); } catch { /* not started */ }
+  }, []);
+
+  // Move on — stop the ear and the audio first so nothing bleeds across.
+  const next = useCallback(() => {
+    stopListening();
+    try { player.pause(); } catch { /* fine */ }
+    if (!segments) return;
+    if (idx + 1 >= segments.length) onClose();
+    else setIdx(idx + 1);
+  }, [idx, segments, onClose, player, stopListening]);
+
+  const startListening = useCallback(async () => {
+    if (!voiceOn) return;
+    try {
+      const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!perm.granted) return;
+    } catch { return; }
+    finalRef.current = "";
+    setHeard("");
+    setPhase("listening");
+    listenOn.current = true;
+    try {
+      ExpoSpeechRecognitionModule.start({ lang: "en-US", interimResults: true, continuous: false });
+    } catch { /* mic busy */ }
+  }, [voiceOn]);
+
+  // Nano answers a question spoken during the brief, then hands back the ear.
+  const converse = useCallback(async (text: string) => {
+    setPhase("thinking");
+    chatHist.current = [...chatHist.current, { role: "user" as const, text }].slice(-12);
+    try {
+      const res = await fetch(`${apiUrl}/v1/voice/converse`, {
+        method: "POST", headers: { ...auth, "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: chatHist.current }),
+      });
+      const r = await res.json();
+      const reply = r.say || "Say that once more?";
+      chatHist.current = [...chatHist.current, { role: "nano" as const, text: reply }];
+      if (r.action === "open_screen" || r.action === "refresh_inbox") { onClose(); onOpenInbox(); return; }
+      setSpoken({ text: reply, id: `ans-${chatHist.current.length}`, isAnswer: true });
+    } catch {
+      setSpoken({ text: "I couldn't reach the server just now. One more time?", id: `ans-err-${Date.now()}`, isAnswer: true });
+    }
+  }, [apiUrl, auth, onClose, onOpenInbox]);
+
+  // What the user said while Nano was listening: a command, or a question.
+  const handleUtterance = useCallback((text: string) => {
+    const t = text.trim().toLowerCase();
+    if (!t) { startListening(); return; }
+    stopListening();
+    if (/\b(next|skip|continue|go on|move on|keep going|carry on)\b/.test(t)) return next();
+    if (/\b(open|show|drafts?|inbox|read them|take me|let'?s see)\b/.test(t)) { onClose(); onOpenInbox(); return; }
+    if (/\b(close|stop|exit|done|quit|dismiss|that'?s all|i'?m good)\b/.test(t)) return onClose();
+    if (/\b(repeat|again|say that again|one more time)\b/.test(t) && seg) {
+      setSpoken({ text: seg.say, id: `seg-${idx}-r${Date.now()}`, isAnswer: false });
+      return;
+    }
+    converse(text);
+  }, [next, converse, onClose, onOpenInbox, startListening, stopListening, seg, idx]);
+
+  useEffect(() => { handleRef.current = handleUtterance; }, [handleUtterance]);
+
+  // A spoken unit finished playing: show the whole line, then open the ear
+  // (unless voice is off, where the person drives with the Next button).
+  const onSpokenDone = useCallback((id: string) => {
+    if (finishedFor.current === id) return;
+    finishedFor.current = id;
+    if (voiceOn) startListening();
+  }, [voiceOn, startListening]);
+
+  // The spoken unit is the current segment (until an answer takes over).
   useEffect(() => {
-    if (!seg) return;
+    if (seg) setSpoken({ text: seg.say, id: `seg-${idx}`, isAnswer: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idx, segments]);
+
+  // Fetch word timings + audio for whatever is being spoken.
+  useEffect(() => {
+    if (!spoken) return;
     setCapN(0);
     setTimedWords(null);
-    wordTimers.current.forEach(clearTimeout);
-    wordTimers.current = [];
+    setPhase("speaking");
+    finishedFor.current = "";
     if (capTimer.current) clearInterval(capTimer.current);
+    const unit = spoken;
     let cancelled = false;
     (async () => {
       let words: { w: string; t: number }[] = [];
       if (voiceOn) {
         try {
-          const r = await fetch(
-            `${apiUrl}/v1/voice/speak_timed?text=${encodeURIComponent(seg.say)}`,
-            { headers: auth });
+          const r = await fetch(`${apiUrl}/v1/voice/speak_timed?text=${encodeURIComponent(unit.text)}`, { headers: auth });
           if (r.ok) words = (await r.json()).words ?? [];
-        } catch { /* fall back below */ }
+        } catch { /* fall back */ }
       }
       if (cancelled) return;
-      if (words.length) {
+      if (words.length && voiceOn) {
         setTimedWords(words);
-        setSayUrl(`${apiUrl}/v1/voice/speak_timed_audio?text=${encodeURIComponent(seg.say)}`);
-        words.forEach((w, i) => {
-          wordTimers.current.push(setTimeout(() => setCapN(i + 1), Math.max(0, w.t * 1000)));
-        });
+        setSayUrl(`${apiUrl}/v1/voice/speak_timed_audio?text=${encodeURIComponent(unit.text)}&u=${unit.id}`);
       } else {
-        // No timings: steady character reveal, plain /speak audio.
-        if (voiceOn) {
-          setSayUrl(`${apiUrl}/v1/voice/speak?text=${encodeURIComponent(seg.say)}`);
-        }
+        if (voiceOn) setSayUrl(`${apiUrl}/v1/voice/speak?text=${encodeURIComponent(unit.text)}&u=${unit.id}`);
+        // No timings (or muted): steady character reveal, then hand off.
+        const len = unit.text.length;
         capTimer.current = setInterval(() => {
           setCapN((n) => {
-            if (n + 1 >= seg.say.length) {
+            if (n + 2 >= len) {
               if (capTimer.current) clearInterval(capTimer.current);
-              return seg.say.length;
+              onSpokenDone(unit.id);
+              return len;
             }
             return n + 2;
           });
         }, 42);
       }
     })();
-    return () => {
-      cancelled = true;
-      wordTimers.current.forEach(clearTimeout);
-      wordTimers.current = [];
-      if (capTimer.current) clearInterval(capTimer.current);
-    };
+    return () => { cancelled = true; if (capTimer.current) clearInterval(capTimer.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idx, segments]);
+  }, [spoken?.id, voiceOn]);
 
+  // Play the current audio.
   useEffect(() => {
-    if (sayUrl && voiceOn) {
-      try { player.play(); } catch { /* muted device */ }
-    }
-    if (!voiceOn) {
-      try { player.pause(); } catch { /* fine */ }
-    }
+    if (sayUrl && voiceOn) { try { player.play(); } catch { /* muted */ } }
+    if (!voiceOn) { try { player.pause(); } catch { /* fine */ } }
   }, [sayUrl, voiceOn, player]);
 
-  const next = useCallback(() => {
-    if (!segments) return;
-    if (idx + 1 >= segments.length) onClose();
-    else setIdx(idx + 1);
-  }, [idx, segments, onClose]);
+  // Caption tracks the audio clock — so it never freezes mid-line and never
+  // races ahead of the voice.
+  useEffect(() => {
+    if (!timedWords || !voiceOn) return;
+    const tcur = status.currentTime ?? 0;
+    let n = 0;
+    while (n < timedWords.length && timedWords[n].t <= tcur + 0.02) n++;
+    setCapN(n);
+  }, [status.currentTime, timedWords, voiceOn]);
+
+  // Playback ended: fill the line and open the ear.
+  useEffect(() => {
+    if (status.didJustFinish && spoken) {
+      if (timedWords) setCapN(timedWords.length);
+      onSpokenDone(spoken.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status.didJustFinish]);
+
+  // The ear: interim words show as "heard"; a final result (or a pause after
+  // speech) is acted on.
+  useSpeechRecognitionEvent("result", (e) => {
+    if (!listenOn.current) return;
+    const best = e.results?.[0]?.transcript ?? "";
+    setHeard(best);
+    if (e.isFinal) { finalRef.current = best; handleRef.current(best); }
+  });
+  useSpeechRecognitionEvent("end", () => {
+    if (!listenOn.current) return;
+    const h = finalRef.current.trim();
+    if (h) { handleRef.current(h); }
+    else { try { ExpoSpeechRecognitionModule.start({ lang: "en-US", interimResults: true, continuous: false }); } catch {} }
+  });
+  useSpeechRecognitionEvent("error", () => {
+    if (listenOn.current && phase === "listening") setTimeout(() => startListening(), 500);
+  });
+
+  useEffect(() => () => { stopListening(); }, [stopListening]);
 
   if (!seg) {
     return (
@@ -304,11 +415,26 @@ export function BriefPlayer({
             </Animated.View>
           </View>
           <View style={{ flex: 1, minWidth: 0, paddingTop: 3 }}>
-            <Text style={s.caption}>
-              {timedWords ? timedWords.slice(0, capN).map((w) => w.w).join(" ") : seg.say.slice(0, capN)}
-              <Text style={s.caret}>▎</Text>
-            </Text>
-            <Text style={s.mode}>{voiceOn ? "SPEAKING · TAP NEXT TO SKIP" : "READING · VOICE OFF"}</Text>
+            {phase === "listening" ? (
+              <Text style={s.caption}>
+                {heard
+                  ? <Text style={{ color: "#C7B8FF" }}>{heard}</Text>
+                  : <Text style={{ color: "rgba(199,184,255,0.6)" }}>Say “next”, or ask me anything…</Text>}
+              </Text>
+            ) : (
+              <Text style={s.caption}>
+                {timedWords
+                  ? timedWords.slice(0, capN).map((w) => w.w).join(" ")
+                  : (spoken?.text ?? seg.say).slice(0, capN)}
+                <Text style={s.caret}>▎</Text>
+              </Text>
+            )}
+            <Text style={s.mode}>{
+              !voiceOn ? "READING · VOICE OFF"
+              : phase === "listening" ? "LISTENING · SAY NEXT, OR ASK"
+              : phase === "thinking" ? "THINKING…"
+              : "SPEAKING · TAP NEXT TO SKIP"
+            }</Text>
           </View>
         </View>
         <View style={{ flexDirection: "row", gap: 9, marginTop: 15 }}>

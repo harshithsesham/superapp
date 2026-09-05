@@ -1343,3 +1343,37 @@ def test_liveactivity_token_registration_and_task_hooks():
     finally:
         settings.worker_token = ""
 
+
+def test_mute_and_autoreply_persist_without_validator_crash():
+    """Regression: mute/auto-reply store name maps (not list fields), so the
+    fact validator no longer 500s and 'do not show these again' actually
+    filters the note out of Worth knowing."""
+    from superapp.substrate.facts import read_facts
+
+    # Mute by kind persists and returns 200 (was a 500 from a list-typed fact).
+    r = client.post("/v1/inbox/mute", headers=AUTH, json={"kind": "job alerts from LinkedIn"})
+    assert r.status_code == 200 and r.json()["ok"]
+    r = client.post("/v1/inbox/mute", headers=AUTH, json={"sender": "promo@shop.example"})
+    assert r.status_code == 200
+
+    db = SessionLocal()
+    fact = next((f for f in read_facts(db, user_id="harshith", domains=["inbox"], limit=30)
+                 if f.key == "mutes"), None)
+    assert fact is not None
+    # Stored as name->true maps, so the belief validator accepts them.
+    assert isinstance(fact.value["kinds"], dict)
+    assert "job alerts from LinkedIn" in fact.value["kinds"]
+    assert "promo@shop.example" in fact.value["senders"]
+    db.close()
+
+    # Auto-reply persists and the state endpoint returns a plain list.
+    assert client.post("/v1/inbox/autoreply", headers=AUTH,
+                       json={"kind": "seat changes from airlines"}).status_code == 200
+    kinds = client.get("/v1/inbox/state", headers=AUTH).json()["auto_reply_kinds"]
+    assert isinstance(kinds, list) and "seat changes from airlines" in kinds
+    # Removing it works too.
+    assert client.request("DELETE", "/v1/inbox/autoreply", headers=AUTH,
+                          json={"kind": "seat changes from airlines"}).status_code == 200
+    kinds = client.get("/v1/inbox/state", headers=AUTH).json()["auto_reply_kinds"]
+    assert "seat changes from airlines" not in kinds
+

@@ -276,7 +276,7 @@ def inbox_state(user_id: str = Depends(current_user_id), db: Session = Depends(g
                   else client.auth_url(state=_sign_state(user_id))}
 
     ar_fact = _autoreply_fact(db, user_id)
-    auto_kinds = (ar_fact.value or {}).get("kinds", []) if ar_fact else []
+    auto_kinds = list((ar_fact.value or {}).get("kinds", [])) if ar_fact else []
 
     return {
         "connected": data.get("connected", False),
@@ -333,6 +333,30 @@ class AutoReplyBody(BaseModel):
     kind: str = Field(min_length=3, max_length=120)
 
 
+def _as_map(v) -> dict:
+    """Accept the legacy list form and the map form; return a name->true map."""
+    if isinstance(v, dict):
+        return dict(v)
+    if isinstance(v, list):
+        return {str(x): True for x in v}
+    return {}
+
+
+def _fit(value: dict, limit: int = 900) -> dict:
+    """Keep a mutes/autoreply fact under the user_facts size cap, dropping the
+    oldest entries first (dicts preserve insertion order)."""
+    import json as _json
+    while len(_json.dumps(value, default=str)) > limit:
+        for field in ("senders", "kinds"):
+            m = value.get(field)
+            if isinstance(m, dict) and m:
+                m.pop(next(iter(m)))
+                break
+        else:
+            break
+    return value
+
+
 def _autoreply_fact(db: Session, user_id: str):
     from sqlalchemy import select as _select
 
@@ -349,16 +373,15 @@ def add_autoreply(body: AutoReplyBody, user_id: str = Depends(current_user_id),
     Every auto-reply surfaces under Worth knowing — never silent."""
     from ..substrate.facts import write_fact
     fact = _autoreply_fact(db, user_id)
-    value = dict(fact.value) if fact and fact.value else {"kinds": []}
-    if body.kind.strip().lower() not in [k.lower() for k in value.get("kinds", [])]:
-        value.setdefault("kinds", []).append(body.kind.strip()[:120])
-    value["kinds"] = value["kinds"][-30:]
+    kinds = _as_map(fact.value.get("kinds")) if fact and fact.value else {}
+    kinds[body.kind.strip()[:120]] = True
+    value = _fit({"kinds": kinds})
     write_fact(db, user_id=user_id, domain="inbox", key="auto_reply_kinds",
                value=value, confidence=1.0, source_agent="inbox")
     append_event(db, user_id=user_id, type="autoreply_enabled", agent="inbox",
                  domain="inbox", payload={"kind": body.kind.strip()[:120]})
     db.commit()
-    return {"ok": True, "kinds": value["kinds"]}
+    return {"ok": True, "kinds": list(value["kinds"])}
 
 
 @router.delete("/inbox/autoreply")
@@ -366,13 +389,14 @@ def remove_autoreply(body: AutoReplyBody, user_id: str = Depends(current_user_id
                      db: Session = Depends(get_db)):
     from ..substrate.facts import write_fact
     fact = _autoreply_fact(db, user_id)
-    value = dict(fact.value) if fact and fact.value else {"kinds": []}
-    value["kinds"] = [k for k in value.get("kinds", [])
-                      if k.lower() != body.kind.strip().lower()]
+    kinds = _as_map(fact.value.get("kinds")) if fact and fact.value else {}
+    target = body.kind.strip().lower()
+    kinds = {k: v for k, v in kinds.items() if k.lower() != target}
+    value = {"kinds": kinds}
     write_fact(db, user_id=user_id, domain="inbox", key="auto_reply_kinds",
                value=value, confidence=1.0, source_agent="inbox")
     db.commit()
-    return {"ok": True, "kinds": value["kinds"]}
+    return {"ok": True, "kinds": list(kinds)}
 
 
 class MuteBody(BaseModel):
@@ -394,13 +418,13 @@ def mute(body: MuteBody, user_id: str = Depends(current_user_id),
     fact = db.scalar(_select(UserFact).where(
         UserFact.user_id == user_id, UserFact.domain == "inbox",
         UserFact.key == "mutes"))
-    value = dict(fact.value) if fact and fact.value else {"kinds": [], "senders": []}
-    if body.kind and body.kind.strip().lower() not in [k.lower() for k in value.get("kinds", [])]:
-        value.setdefault("kinds", []).append(body.kind.strip()[:120])
-    if body.sender and body.sender.strip().lower() not in [x.lower() for x in value.get("senders", [])]:
-        value.setdefault("senders", []).append(body.sender.strip().lower()[:320])
-    value["kinds"] = value.get("kinds", [])[-40:]
-    value["senders"] = value.get("senders", [])[-40:]
+    kinds = _as_map(fact.value.get("kinds")) if fact and fact.value else {}
+    senders = _as_map(fact.value.get("senders")) if fact and fact.value else {}
+    if body.kind:
+        kinds[body.kind.strip()[:120]] = True
+    if body.sender:
+        senders[body.sender.strip().lower()[:320]] = True
+    value = _fit({"kinds": kinds, "senders": senders})
     write_fact(db, user_id=user_id, domain="inbox", key="mutes", value=value,
                confidence=1.0, source_agent="inbox")
     append_event(db, user_id=user_id, type="inbox_muted", agent="inbox", domain="inbox",
