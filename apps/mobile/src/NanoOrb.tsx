@@ -520,13 +520,24 @@ export function NanoOrb({
     setChatWork(ctx ? "reading it across your inbox" : "reading your inbox");
     const prefix = ctx ? `About the ${ctx.type === "note" ? "note" : "email"} from ${ctx.label}: ` : "";
     chatHist.current = [...chatHist.current, { role: "user" as const, text: prefix + text }].slice(-16);
-    try {
+    const ask = async () => {
       const res = await fetch(`${apiUrl}/v1/voice/converse`, {
         method: "POST",
         headers: { ...auth, "Content-Type": "application/json" },
         body: JSON.stringify({ messages: chatHist.current }),
       });
-      const r = await res.json();
+      if (!res.ok) throw new Error(`converse ${res.status}`);
+      return res.json();
+    };
+    try {
+      let r;
+      try {
+        r = await ask();
+      } catch {
+        // One quiet retry so a brief server blip doesn't surface as an error.
+        await new Promise((res) => setTimeout(res, 1200));
+        r = await ask();
+      }
       const reply = r.say || "Say that once more?";
       chatHist.current = [...chatHist.current, { role: "nano" as const, text: reply }];
       setChatWork(null);

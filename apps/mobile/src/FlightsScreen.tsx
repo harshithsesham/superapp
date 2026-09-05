@@ -123,19 +123,31 @@ export function FlightsScreen({
     setSending(true);
     const history = [...msgs, { kind: "text" as const, role: "user" as const, text }];
     setMsgs(history);
-    try {
+    const body = JSON.stringify({
+      messages: history
+        .filter((m): m is Extract<Msg, { kind: "text" }> => m.kind === "text")
+        .slice(-16)
+        .map((m) => ({ role: m.role, text: m.text })),
+    });
+    // One quiet retry: a brief server blip (e.g. a redeploy) shouldn't throw
+    // the "couldn't reach the server" line at you on the first hiccup.
+    const ask = async () => {
       const res = await fetch(`${apiUrl}/v1/voice/converse`, {
         method: "POST",
         headers: { ...auth, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: history
-            .filter((m): m is Extract<Msg, { kind: "text" }> => m.kind === "text")
-            .slice(-16)
-            .map((m) => ({ role: m.role, text: m.text })),
-        }),
+        body,
       });
-      if (!res.ok) throw new Error("converse failed");
-      const data = await res.json();
+      if (!res.ok) throw new Error(`converse ${res.status}`);
+      return res.json();
+    };
+    try {
+      let data;
+      try {
+        data = await ask();
+      } catch {
+        await new Promise((r) => setTimeout(r, 1200));
+        data = await ask();
+      }
       if (!alive.current) return;
       setMsgs((m) => [...m, { kind: "text", role: "nano", text: data.say ?? "…" }]);
       refresh();
