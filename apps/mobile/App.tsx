@@ -5,6 +5,7 @@ import { InstrumentSans_400Regular, InstrumentSans_600SemiBold } from "@expo-goo
 import { InstrumentSerif_400Regular } from "@expo-google-fonts/instrument-serif";
 import { JetBrainsMono_400Regular } from "@expo-google-fonts/jetbrains-mono";
 import * as ImagePicker from "expo-image-picker";
+import { setAudioModeAsync } from "expo-audio";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
@@ -30,7 +31,7 @@ import {
   requestAuthorization as requestHealthAuthorization,
 } from "@kingstinct/react-native-healthkit";
 import { InterviewScreen } from "./src/InterviewScreen";
-import { NanoOrb } from "./src/NanoOrb";
+import { NanoOrb, type DockContext } from "./src/NanoOrb";
 import { CalScreen } from "./src/CalScreen";
 import { FlightsScreen } from "./src/FlightsScreen";
 import { HubScreen } from "./src/HubScreen";
@@ -379,6 +380,13 @@ function App() {
   const [orbSignal, setOrbSignal] = useState(0);
   const [stageSignal, setStageSignal] = useState(0);
   const [briefPlaying, setBriefPlaying] = useState(false);
+  const [dockContext, setDockContext] = useState<{ seq: number; ctx: DockContext } | null>(null);
+
+  // Route audio to the speaker even with the ring/silent switch on, so the
+  // brief and the orb actually speak.
+  useEffect(() => {
+    setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
+  }, []);
 
   const onFixMeal = useCallback((mealId: string) => {
     Alert.prompt(
@@ -654,7 +662,8 @@ function App() {
 
       {screenName === "inbox" && !error ? (
         <View style={StyleSheet.absoluteFillObject}>
-          <InboxScreen apiUrl={apiUrl} auth={AUTH} onBack={() => setScreenName("hub")} />
+          <InboxScreen apiUrl={apiUrl} auth={AUTH} onBack={() => setScreenName("hub")}
+                       onLongPressItem={(ctx) => setDockContext({ seq: Date.now(), ctx })} />
         </View>
       ) : null}
 
@@ -768,6 +777,7 @@ function App() {
         auth={AUTH}
         openSignal={orbSignal}
         stageSignal={stageSignal}
+        contextOpen={dockContext}
         onNavigate={onNavigate}
         onRefreshInbox={() => {
           setScreenName("inbox");

@@ -5,10 +5,12 @@
 // when you tap it again or say goodbye. The get-to-know-you interview
 // happens right here in the same conversation — no screen switch.
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Animated, Easing, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import { useAudioPlayer } from "expo-audio";
+import { setAudioModeAsync, useAudioPlayer } from "expo-audio";
 import {
   ExpoSpeechRecognitionModule,
   useSpeechRecognitionEvent,
@@ -18,6 +20,21 @@ import { useConversation } from "@elevenlabs/react-native";
 type OrbPhase = "idle" | "listening" | "thinking" | "speaking";
 type OrbMode = "converse" | "interview";
 type ConverseTurn = { role: "user" | "nano"; text: string };
+
+// Long-press on any inbox card brings Nano to it with that item as the
+// subject — the dock opens in chat mode, contextualized. This is what the
+// old Alert dialog became.
+export type DockContext = {
+  type: "decision" | "note";
+  label: string;        // who it's from (display name)
+  kind?: string;        // the recurring-stream label ("seat changes")
+  fromAddr?: string;
+  draftId?: string;     // decision: defer / dismiss target
+  noteId?: string;      // note: settle target
+  why?: string;         // note: why it surfaced
+};
+
+type Chip = { key: string; label: string; run: () => void };
 
 // The orb never leaves on its own — only a tap or an explicit goodbye ends
 // it. Quiet stretches just keep the ear open.
@@ -30,6 +47,7 @@ export function NanoOrb({
   onActed,
   openSignal,
   stageSignal,
+  contextOpen,
 }: {
   apiUrl: string;
   auth: Record<string, string>;
@@ -38,6 +56,7 @@ export function NanoOrb({
   onActed?: () => void;
   openSignal?: number;
   stageSignal?: number;
+  contextOpen?: { seq: number; ctx: DockContext } | null;
 }) {
   const insets = useSafeAreaInsets();
   const [open, setOpen] = useState(false);
@@ -46,6 +65,14 @@ export function NanoOrb({
   const [say, setSay] = useState("");
   const [sayUrl, setSayUrl] = useState<string | null>(null);
   const [progress, setProgress] = useState(0); // interview progress, 0 hides the bar
+
+  // Chat (type-to-ask) side of the dock, and the item it's about.
+  const [dockMode, setDockMode] = useState<"voice" | "chat">("voice");
+  const [ctx, setCtx] = useState<DockContext | null>(null);
+  const [draft, setDraft] = useState("");
+  const [chatWork, setChatWork] = useState<string | null>(null);
+  const [chatReply, setChatReply] = useState<string | null>(null);
+  const chatHist = useRef<ConverseTurn[]>([]);
   // The stage: full-screen conversation surface with live captions —
   // same session as the edge ball, bigger presence.
   const [stage, setStage] = useState(false);
@@ -79,6 +106,13 @@ export function NanoOrb({
       } catch {}
     }
   }, [sayUrl]);
+
+  // Play through the speaker even when the ring/silent switch is on — without
+  // this, Nano's captions animate but no sound comes out. (The #1 "it's not
+  // speaking" cause on iOS.)
+  useEffect(() => {
+    setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const loop = Animated.loop(
@@ -138,6 +172,12 @@ export function NanoOrb({
       setSay("");
       setSayUrl(null);
       setProgress(0);
+      setCtx(null);
+      setDraft("");
+      setChatWork(null);
+      setChatReply(null);
+      setDockMode("voice");
+      chatHist.current = [];
       mode.current = "converse";
       interviewSession.current = null;
     });
@@ -330,6 +370,7 @@ export function NanoOrb({
     reconnected.current = false;
     emptyListens.current = 0;
     history.current = [];
+    setDockMode("voice");
     setOpen(true);
     Animated.timing(glide, {
       toValue: 1, duration: 460, easing: Easing.out(Easing.back(1.4)), useNativeDriver: true,
@@ -416,6 +457,153 @@ export function NanoOrb({
     else collapse();
   }, [openOrb, collapse]);
 
+  // ── Chat (type-to-ask) side ──────────────────────────────────────────────
+  // Long-press on a card opens the dock in chat mode with that item as the
+  // subject. No mic, no takeover — Nano comes to the thing you held.
+  const openChat = useCallback((c: DockContext | null) => {
+    if (rtActive.current) {
+      rtActive.current = false;
+      try { rt.endSession(); } catch {}
+    }
+    if (rtPoll.current) clearInterval(rtPoll.current);
+    try { ExpoSpeechRecognitionModule.stop(); } catch {}
+    openRef.current = false;
+    chatHist.current = [];
+    setCtx(c);
+    setDockMode("chat");
+    setDraft("");
+    setChatWork(null);
+    setChatReply(null);
+    setSay("");
+    setTranscript("");
+    setCapWords([]);
+    setPhase("idle");
+    setOpen(true);
+    Animated.timing(glide, {
+      toValue: 1, duration: 460, easing: Easing.out(Easing.back(1.4)), useNativeDriver: true,
+    }).start();
+  }, [rt]);
+
+  // Switch chat → voice: hand off to the live mic session, keeping the dock up.
+  const goVoice = useCallback(() => {
+    setDockMode("voice");
+    setChatReply(null);
+    setChatWork(null);
+    openOrb();
+  }, [openOrb]);
+
+  // Switch voice → chat: drop the mic session, stay open as a text thread.
+  const goChat = useCallback(() => {
+    openRef.current = false;
+    if (rtActive.current) {
+      rtActive.current = false;
+      try { rt.endSession(); } catch {}
+    }
+    if (rtPoll.current) clearInterval(rtPoll.current);
+    try { ExpoSpeechRecognitionModule.stop(); } catch {}
+    if (speakTimer.current) clearTimeout(speakTimer.current);
+    setPhase("idle");
+    setSay("");
+    setSayUrl(null);
+    setTranscript("");
+    setCapWords([]);
+    setDockMode("chat");
+  }, [rt]);
+
+  // A typed question — same brain as the orb, with the held item as context.
+  const chatSend = useCallback(async (textArg?: string) => {
+    const text = (typeof textArg === "string" ? textArg : draft).trim();
+    if (!text) return;
+    setDraft("");
+    setChatReply(null);
+    setChatWork(ctx ? "reading it across your inbox" : "reading your inbox");
+    const prefix = ctx ? `About the ${ctx.type === "note" ? "note" : "email"} from ${ctx.label}: ` : "";
+    chatHist.current = [...chatHist.current, { role: "user" as const, text: prefix + text }].slice(-16);
+    try {
+      const res = await fetch(`${apiUrl}/v1/voice/converse`, {
+        method: "POST",
+        headers: { ...auth, "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: chatHist.current }),
+      });
+      const r = await res.json();
+      const reply = r.say || "Say that once more?";
+      chatHist.current = [...chatHist.current, { role: "nano" as const, text: reply }];
+      setChatWork(null);
+      setChatReply(reply);
+      if (r.action === "open_screen" && r.screen) onNavigate(r.screen);
+      if (r.action === "refresh_inbox") onRefreshInbox();
+      if (r.acted) onActed?.();
+    } catch {
+      setChatWork(null);
+      setChatReply("I couldn't reach the server just now — one more time?");
+    }
+  }, [apiUrl, auth, ctx, draft, onActed, onNavigate, onRefreshInbox]);
+
+  // A contextual chip: do the real thing, then Nano confirms in its own words.
+  const ctxAct = useCallback(
+    async (confirm: string, req: { path: string; method?: string; body?: object } | null) => {
+      setChatReply(null);
+      setChatWork("applying it across your inbox");
+      try {
+        if (req) {
+          await fetch(`${apiUrl}${req.path}`, {
+            method: req.method ?? "POST",
+            headers: { ...auth, "Content-Type": "application/json" },
+            body: req.body ? JSON.stringify(req.body) : undefined,
+          });
+        }
+      } catch { /* the confirm still shows; refresh reconciles */ }
+      setChatWork(null);
+      setChatReply(confirm);
+      onActed?.();
+    },
+    [apiUrl, auth, onActed]
+  );
+
+  // The chips Nano offers for the held item — the old Alert options, now
+  // spoken-to. Each does the real action and Nano confirms.
+  const ctxChips = useCallback((): Chip[] => {
+    if (!ctx) return [];
+    const Kind = ctx.kind ? ctx.kind[0].toUpperCase() + ctx.kind.slice(1) : "This";
+    if (ctx.type === "decision") {
+      return [
+        { key: "mute-sender", label: "Do not reply to this sender", run: () => ctxAct(
+          `${ctx.label} comes straight to you from now on. I won't draft for them again.`,
+          ctx.fromAddr ? { path: "/v1/inbox/mute", body: { sender: ctx.fromAddr } } : null) },
+        ...(ctx.kind ? [{ key: "auto", label: "Auto-reply to these next time", run: () => ctxAct(
+          "Done. I answer this kind myself from now on, signed as mine, and it lands under Worth knowing.",
+          { path: "/v1/inbox/autoreply", body: { kind: ctx.kind } }) }] : []),
+        ...(ctx.draftId ? [{ key: "hold", label: "Hold it until 6pm", run: () => ctxAct(
+          "Held. I raise it once at 6pm and once tomorrow morning, then it's yours.",
+          { path: `/v1/inbox/drafts/${ctx.draftId}/defer`,
+            body: { tz_offset_minutes: new Date().getTimezoneOffset() } }) }] : []),
+        ...(ctx.draftId ? [{ key: "never", label: "Never chase me about this", run: () => ctxAct(
+          "No more reminders on this one. It stays in the Hub and I stay quiet.",
+          { path: `/v1/inbox/drafts/${ctx.draftId}/dismiss` }) }] : []),
+      ];
+    }
+    return [
+      ...(ctx.kind ? [{ key: "mute-kind", label: "Do not show me these again", run: () => ctxAct(
+        `Gone. ${Kind} won't reach you again.`,
+        { path: "/v1/inbox/mute", body: { kind: ctx.kind } }) }] : []),
+      { key: "mute-sender", label: "Never from this sender", run: () => ctxAct(
+        `Nothing from ${ctx.label} will surface again. It still files, it just never speaks.`,
+        ctx.fromAddr ? { path: "/v1/inbox/mute", body: { sender: ctx.fromAddr } } : null) },
+      ...(ctx.kind ? [{ key: "auto", label: "Auto-reply to these next time", run: () => ctxAct(
+        "Done. I answer this kind myself from now on and summarise it for you after.",
+        { path: "/v1/inbox/autoreply", body: { kind: ctx.kind } }) }] : []),
+      { key: "why", label: "Why did I see this?", run: () =>
+        ctx.noteId ? void ctxAct(ctx.why || "Because it carried real information, but nothing you had to answer.", null)
+                   : void chatSend("Why did I see this?") },
+    ];
+  }, [ctx, ctxAct, chatSend]);
+
+  // Open in chat mode when a card is long-pressed (App relays the context).
+  useEffect(() => {
+    if (contextOpen && contextOpen.seq) openChat(contextOpen.ctx);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contextOpen?.seq]);
+
   useEffect(() => {
     if (!rtActive.current) return;
     setPhase(rt.isSpeaking ? "speaking" : "listening");
@@ -429,13 +617,14 @@ export function NanoOrb({
   return (
     <>
     {stage ? (
-      <View style={o.vdock}>
+      <View style={[o.vdock, { paddingBottom: 14 + Math.max(insets.bottom - 8, 0) }]}>
         <View style={o.vdockHead}>
           <View style={o.waveRow}>
             {[10, 16, 8, 14, 11, 17, 9].map((h, i) => (
               <Animated.View key={i} style={[o.waveBar, {
-                height: h,
-                opacity: breath.interpolate({
+                height: dockMode === "chat" ? 4 : h,
+                backgroundColor: dockMode === "chat" ? "rgba(255,255,255,0.2)" : "#C7B8FF",
+                opacity: dockMode === "chat" ? 1 : breath.interpolate({
                   inputRange: [0, 1],
                   outputRange: i % 2 ? [0.35, 0.95] : [0.95, 0.35],
                 }),
@@ -443,30 +632,94 @@ export function NanoOrb({
             ))}
           </View>
           <Text style={o.vdockLabel}>
-            NANO  ·  {phase === "speaking" ? "SPEAKING" : phase === "thinking" ? "THINKING" : "LISTENING"}
+            {dockMode === "chat"
+              ? (chatWork ? "NANO  ·  THINKING" : "NANO  ·  TYPE TO ASK")
+              : `NANO  ·  ${phase === "speaking" ? "SPEAKING" : phase === "thinking" ? "THINKING" : "LISTENING"}`}
           </Text>
-          <Pressable onPress={collapse} hitSlop={12}>
-            <Text style={{ color: "#8A87A3", fontSize: 16 }}>✕</Text>
+          <Pressable
+            style={o.modePill}
+            onPress={() => (dockMode === "chat" ? goVoice() : goChat())}
+            hitSlop={8}
+          >
+            <Text style={o.modePillText}>{dockMode === "chat" ? "SPEAK" : "TYPE"}</Text>
+          </Pressable>
+          <Pressable onPress={collapse} hitSlop={12} style={o.closeDot}>
+            <Text style={{ color: "rgba(244,242,250,0.6)", fontSize: 13 }}>✕</Text>
           </Pressable>
         </View>
+
         {progress > 0 ? (
           <View style={o.vdockProgress}>
             <View style={[o.vdockProgressFill, { width: `${Math.round(progress * 100)}%` }]} />
           </View>
         ) : null}
-        {transcript ? (
-          <Text style={o.vdockHeard} numberOfLines={1}>“{transcript}”</Text>
-        ) : null}
-        {capWords.length ? (
-          <Text style={o.vdockCaption}>
-            <Text style={o.capSaid}>{capWords.slice(0, capN + 1).join(" ")}</Text>
-            {capN + 1 < capWords.length ? (
-              <Text style={o.capRest}> {capWords.slice(capN + 1).join(" ")}</Text>
+
+        {dockMode === "voice" ? (
+          <>
+            {transcript ? (
+              <Text style={o.vdockHeard} numberOfLines={1}>“{transcript}”</Text>
             ) : null}
-          </Text>
-        ) : !transcript ? (
-          <Text style={o.vdockHint}>Say it — I'm listening.</Text>
-        ) : null}
+            {capWords.length ? (
+              <Text style={o.vdockCaption}>
+                <Text style={o.capSaid}>{capWords.slice(0, capN + 1).join(" ")}</Text>
+                {capN + 1 < capWords.length ? (
+                  <Text style={o.capRest}> {capWords.slice(capN + 1).join(" ")}</Text>
+                ) : null}
+              </Text>
+            ) : !transcript ? (
+              <Text style={o.vdockHint}>Say it — I'm listening.</Text>
+            ) : null}
+          </>
+        ) : (
+          <View>
+            {ctx ? (
+              <View style={o.ctxChip}>
+                <View style={o.ctxDot} />
+                <Text style={o.ctxChipText} numberOfLines={1}>About {ctx.label}</Text>
+                <Pressable onPress={() => { setCtx(null); setChatReply(null); setChatWork(null); }} hitSlop={8}>
+                  <Text style={o.ctxClear}>Clear</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
+            {chatWork ? (
+              <Text style={o.chatWork}>{chatWork}…</Text>
+            ) : chatReply ? (
+              <Text style={o.chatReply}>{chatReply}</Text>
+            ) : null}
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={o.chipRow} keyboardShouldPersistTaps="handled">
+              {(ctx ? ctxChips()
+                    : ["What needs me?", "Summarise my inbox", "What did you send?"].map((q) => (
+                        { key: q, label: q, run: () => chatSend(q) } as Chip
+                      ))
+              ).map((c) => (
+                <Pressable key={c.key} style={o.promptChip} onPress={c.run}>
+                  <Text style={o.promptChipText}>{c.label}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+
+            <View style={o.inputRow}>
+              <TextInput
+                style={o.input}
+                value={draft}
+                onChangeText={setDraft}
+                onSubmitEditing={() => chatSend()}
+                placeholder="Ask about your inbox"
+                placeholderTextColor="rgba(244,242,250,0.4)"
+                returnKeyType="send"
+              />
+              <Pressable
+                onPress={() => chatSend()}
+                style={[o.sendDot, { backgroundColor: draft.trim() ? "#C7B8FF" : "rgba(255,255,255,0.1)" }]}
+              >
+                <Text style={{ color: draft.trim() ? "#14101F" : "rgba(244,242,250,0.5)", fontSize: 16, marginTop: -1 }}>↑</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
       </View>
     ) : null}
     </>
@@ -492,6 +745,70 @@ const o = StyleSheet.create({
     flex: 1,
     fontFamily: "JetBrainsMono_400Regular", fontSize: 10, letterSpacing: 3,
     color: "#8A87A3", marginLeft: 4,
+  },
+  modePill: {
+    flexDirection: "row", alignItems: "center",
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 100,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.14)",
+  },
+  modePillText: {
+    fontFamily: "JetBrainsMono_400Regular", fontSize: 9.5, letterSpacing: 1.5,
+    color: "rgba(199,184,255,0.9)",
+  },
+  closeDot: {
+    width: 22, height: 22, borderRadius: 11,
+    alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.07)",
+  },
+  ctxChip: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 100,
+    backgroundColor: "rgba(199,184,255,0.1)",
+    borderWidth: 1, borderColor: "rgba(199,184,255,0.22)",
+    alignSelf: "flex-start", maxWidth: "100%", marginTop: 13,
+  },
+  ctxDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#C7B8FF" },
+  ctxChipText: {
+    flexShrink: 1, fontFamily: "InstrumentSans_400Regular", fontSize: 11.5,
+    color: "rgba(244,242,250,0.8)",
+  },
+  ctxClear: {
+    fontFamily: "InstrumentSans_600SemiBold", fontSize: 11.5,
+    color: "rgba(199,184,255,0.85)",
+  },
+  chatWork: {
+    fontFamily: "InstrumentSans_400Regular", fontSize: 13,
+    color: "rgba(199,184,255,0.7)", marginTop: 12, fontStyle: "italic",
+  },
+  chatReply: {
+    fontFamily: "InstrumentSans_400Regular", fontSize: 15.5, lineHeight: 22,
+    color: "#F4F2FA", marginTop: 12,
+  },
+  chipRow: { gap: 7, paddingTop: 14, paddingBottom: 2, paddingRight: 4 },
+  promptChip: {
+    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 100,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.1)",
+  },
+  promptChipText: {
+    fontFamily: "InstrumentSans_400Regular", fontSize: 11.5,
+    color: "rgba(244,242,250,0.8)",
+  },
+  inputRow: {
+    flexDirection: "row", alignItems: "center", gap: 9,
+    marginTop: 10, paddingLeft: 15, paddingRight: 7, paddingVertical: 7,
+    borderRadius: 100,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
+  },
+  input: {
+    flex: 1, minWidth: 0, padding: 0,
+    fontFamily: "InstrumentSans_400Regular", fontSize: 13.5, color: "#F4F2FA",
+  },
+  sendDot: {
+    width: 31, height: 31, borderRadius: 16,
+    alignItems: "center", justifyContent: "center",
   },
   vdockProgress: {
     height: 2, borderRadius: 1, marginTop: 12,

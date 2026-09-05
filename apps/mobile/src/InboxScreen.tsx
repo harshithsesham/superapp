@@ -5,6 +5,7 @@
 // "where it went". Live data from /v1/inbox/state.
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import type { DockContext } from "./NanoOrb";
 import {
   ActivityIndicator,
   Alert,
@@ -41,8 +42,8 @@ const CAT_COLORS: Record<string, string> = {
 
 type Draft = { id: string; body: string; status: string; deferred?: boolean };
 type Ask = {
-  id: string; from_name: string; subject: string; gist: string; why_now: string;
-  kind: string; received_at: string; body: string; draft: Draft | null;
+  id: string; from_name: string; from_addr?: string; subject: string; gist: string;
+  why_now: string; kind: string; received_at: string; body: string; draft: Draft | null;
 };
 type Note = {
   id: string; from_name: string; from_addr: string; subject: string;
@@ -105,10 +106,12 @@ export function InboxScreen({
   apiUrl,
   auth,
   onBack,
+  onLongPressItem,
 }: {
   apiUrl: string;
   auth: Record<string, string>;
   onBack: () => void;
+  onLongPressItem?: (ctx: DockContext) => void;
 }) {
   const [state, setState] = useState<InboxState | null>(null);
   const [openMail, setOpenMail] = useState<string | null>(null);
@@ -160,17 +163,6 @@ export function InboxScreen({
     } catch { /* refresh reconciles */ }
   }, [apiUrl, auth]);
 
-  const muteRule = useCallback(async (rule: { kind?: string; sender?: string }) => {
-    try {
-      await fetch(`${apiUrl}/v1/inbox/mute`, {
-        method: "POST",
-        headers: { ...auth, "Content-Type": "application/json" },
-        body: JSON.stringify(rule),
-      });
-      refresh();
-    } catch { /* ignore */ }
-  }, [apiUrl, auth, refresh]);
-
   const toggleAutoReply = useCallback(async (kind: string, active: boolean) => {
     try {
       await fetch(`${apiUrl}/v1/inbox/autoreply`, {
@@ -193,15 +185,6 @@ export function InboxScreen({
       { text: "Done", style: "cancel" as const },
     ]);
   }, [state, toggleAutoReply]);
-
-  const noteActions = useCallback((n: Note) => {
-    Alert.alert(n.from_name, "What should I do with this kind of thing?", [
-      ...(n.kind ? [{ text: `Stop showing ${n.kind}`, onPress: () => muteRule({ kind: n.kind }) }] : []),
-      { text: `Never from ${n.from_name}`, onPress: () => muteRule({ sender: n.from_addr }) },
-      { text: "Dismiss this one", style: "destructive" as const, onPress: () => settleNote(n.id) },
-      { text: "Cancel", style: "cancel" as const },
-    ]);
-  }, [muteRule, settleNote]);
 
   const clearNotes = useCallback(async () => {
     try {
@@ -285,7 +268,11 @@ export function InboxScreen({
                   : false;
                 return (
                   <View key={a.id} style={[s.card, a.why_now ? s.cardUrgent : null]}>
-                    <Pressable style={s.cardHead} onPress={() => setOpenMail(expanded ? null : a.id)}>
+                    <Pressable style={s.cardHead} onPress={() => setOpenMail(expanded ? null : a.id)}
+                               onLongPress={() => onLongPressItem?.({
+                                 type: "decision", label: a.from_name, kind: a.kind || undefined,
+                                 fromAddr: a.from_addr, draftId: a.draft?.id,
+                               })} delayLongPress={350}>
                       <LinearGradient colors={TILES[i % TILES.length]}
                                       start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.tile}>
                         <Text style={s.tileText}>{initials(a.from_name)}</Text>
@@ -376,7 +363,7 @@ export function InboxScreen({
                   <View style={s.autoNote}>
                     <Pressable style={s.autoNoteHead}
                                onPress={() => setOpenNote(open ? null : n.id)}
-                               onLongPress={() => noteActions(n)} delayLongPress={350}>
+                               onLongPress={() => onLongPressItem?.({ type: "note", label: n.from_name, kind: n.kind || undefined, fromAddr: n.from_addr, noteId: n.id, why: n.gist })} delayLongPress={350}>
                       <Text style={{ color: "rgba(124,247,196,0.8)", fontSize: 12, marginTop: 2 }}>{"«"}</Text>
                       <View style={{ flex: 1, minWidth: 0 }}>
                         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
@@ -422,7 +409,7 @@ export function InboxScreen({
                 <SwipeRow key={n.id} onDismiss={() => settleNote(n.id)}>
                   <Pressable style={s.note}
                              onPress={() => setOpenNote(open ? null : n.id)}
-                             onLongPress={() => noteActions(n)} delayLongPress={350}>
+                             onLongPress={() => onLongPressItem?.({ type: "note", label: n.from_name, kind: n.kind || undefined, fromAddr: n.from_addr, noteId: n.id, why: n.gist })} delayLongPress={350}>
                     <View style={s.noteDot} />
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={s.noteFrom}>{n.from_name}</Text>
