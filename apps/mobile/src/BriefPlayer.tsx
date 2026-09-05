@@ -60,6 +60,7 @@ export function BriefPlayer({
   const finishedFor = useRef("");
   const chatHist = useRef<{ role: "user" | "nano"; text: string }[]>([]);
   const handleRef = useRef<(t: string) => void>(() => {});
+  const lastSpokenRef = useRef("");
   const pulse = useRef(new Animated.Value(1)).current;
   const player = useAudioPlayer(sayUrl ? { uri: sayUrl, headers: auth } : null);
   const status = useAudioPlayerStatus(player);
@@ -187,6 +188,15 @@ export function BriefPlayer({
   const handleUtterance = useCallback((text: string) => {
     const t = text.trim().toLowerCase();
     if (!t) { startListening(); return; }
+    // Echo guard: if the mic caught the tail of Nano's own voice (a long
+    // phrase that mostly overlaps what it just said), ignore it and keep
+    // listening — never answer yourself.
+    const words = t.split(/\s+/).filter(Boolean);
+    if (words.length >= 3) {
+      const said = new Set(lastSpokenRef.current.split(/\s+/));
+      const overlap = words.filter((w) => said.has(w)).length / words.length;
+      if (overlap > 0.6) { startListening(); return; }
+    }
     stopListening();
     if (/\b(next|skip|continue|go on|move on|keep going|carry on)\b/.test(t)) return next();
     if (/\b(open|show|drafts?|inbox|read them|take me|let'?s see)\b/.test(t)) { onClose(); onOpenInbox(); return; }
@@ -221,6 +231,7 @@ export function BriefPlayer({
     setTimedWords(null);
     setPhase("speaking");
     finishedFor.current = "";
+    lastSpokenRef.current = spoken.text.toLowerCase();
     if (capTimer.current) clearInterval(capTimer.current);
     const unit = spoken;
     let cancelled = false;
