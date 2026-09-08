@@ -49,7 +49,10 @@ def _connect(db: Session, *, user_id: str, email: str, token: dict,
     append_event(db, user_id=user_id, type="gmail_connected", agent="inbox", domain="inbox",
                  payload={"email": email, "provider": provider})
     # Initial backfill + triage (the onboarding "scan" moment).
-    run_think(db, agent="inbox", user_id=user_id, trigger={"kind": "email_sync", "reason": "backfill"})
+    # kind, not reason: the sync branches on kind, so announcing the intent
+    # in reason left a freshly linked mailbox empty until new mail arrived.
+    run_think(db, agent="inbox", user_id=user_id,
+              trigger={"kind": "backfill", "reason": "just connected", "account": email})
     return render_screen(db, agent="inbox", user_id=user_id).model_dump()
 
 

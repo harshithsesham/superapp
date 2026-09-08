@@ -567,9 +567,16 @@ def _sync(db: Session, context: ContextSlice, trigger: dict) -> ThinkResult:
         if trigger.get("kind") in ("backfill", "user_refresh"):
             from sqlalchemy import func
             from ..models import InboxMessage as _IM
+            # Per MAILBOX, not per person. Counting the whole corpus meant a
+            # second mailbox on an established account looked well known and
+            # was filled with nothing, so it read as broken.
             known = db.scalar(select(func.count()).select_from(_IM).where(
-                _IM.user_id == context.user_id)) or 0
-            if trigger.get("kind") == "backfill" or known < 15:
+                _IM.user_id == context.user_id,
+                _IM.account_email == acct.email)) or 0
+            only = trigger.get("account")
+            if only and only != acct.email:
+                pass          # a connect fills the mailbox just connected
+            elif trigger.get("kind") == "backfill" or known < 15:
                 old_mail = client.backfill(40)
                 backfill_ids = {m["gmail_msg_id"] for m in old_mail}
                 msgs = list(msgs) + old_mail

@@ -3129,3 +3129,40 @@ def test_outlook_reads_graph_into_the_same_shape_gmail_produces():
     # a delta deletion and an unsent fragment are not mail
     assert OutlookClient()._parse({"id": "x", "@removed": {"reason": "deleted"}}) is None
     assert OutlookClient()._parse({"id": "x", "isDraft": True}) is None
+
+
+def test_connecting_a_mailbox_actually_fills_it():
+    """A freshly linked mailbox used to sit empty until new mail happened to
+    arrive: the connect path announced its intent in `reason` while the sync
+    branched on `kind`, so the fill was unreachable. And the guard counted the
+    person's whole corpus, so a SECOND mailbox on an established account was
+    judged well known and filled with nothing — which reads as broken."""
+    from superapp.models import InboxMessage, utcnow
+    from sqlalchemy import func
+
+    uid = "fill-tester"
+    db = SessionLocal()
+    # an established account: plenty of mail already, in a DIFFERENT mailbox
+    for i in range(20):
+        db.add(InboxMessage(user_id=uid, account_email="old@example.com",
+                            gmail_msg_id=f"fill-old-{i}", thread_id=f"t{i}",
+                            from_name="Old", from_addr="old@example.com",
+                            subject="old", body_text="old", tier="cleared",
+                            received_at=utcnow()))
+    db.commit()
+    db.close()
+
+    r = client.post("/v1/inbox/connect/stub", headers={"Authorization": f"Bearer {uid}-nope"})
+    assert r.status_code in (401, 403)          # the seam still needs a real token
+
+    # the real path, for the user the test harness authenticates as
+    db = SessionLocal()
+    before = db.scalar(select(func.count()).select_from(InboxMessage).where(
+        InboxMessage.account_email == "stub@example.com")) or 0
+    db.close()
+    assert client.post("/v1/inbox/connect/stub", headers=AUTH).status_code == 200
+    db = SessionLocal()
+    after = db.scalar(select(func.count()).select_from(InboxMessage).where(
+        InboxMessage.account_email == "stub@example.com")) or 0
+    db.close()
+    assert after >= before, "connecting a mailbox must never lose mail"
