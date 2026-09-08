@@ -82,13 +82,16 @@ async def telegram_webhook(secret: str, request: Request, db: Session = Depends(
                        "calories, or an errand for the scout.")
         return {"ok": True}
 
-    # Same brain as the orb: reuse the converse pipeline verbatim.
-    from .voice import ConverseBody, Turn, converse
+    # Same brain as the orb: reuse the converse pipeline verbatim. Passing the
+    # surface through means the conversation is stored durably under "telegram"
+    # by the shared path — the deque below is still a restart away from empty,
+    # but it is now only a latency cache, not the record.
+    from .voice import ConverseBody, Turn, _converse
 
     _history[chat_id].append({"role": "user", "text": text[:4000]})
     try:
         body = ConverseBody(messages=[Turn(**t) for t in _history[chat_id]])
-        result = converse(body, user_id=user_id, db=db)
+        result = _converse(body, user_id=user_id, db=db, surface="telegram")
         say = result.get("say") or "…"
     except Exception:  # noqa: BLE001
         say = "I hit a snag just now — try that again in a moment."

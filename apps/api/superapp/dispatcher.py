@@ -94,7 +94,18 @@ def dispatch_tick(db: Session) -> dict:
         auto_sent = send_due(db)
     except Exception:  # noqa: BLE001
         auto_sent = 0
-    return {"reclaimed": reclaimed, "campaigns_queued": campaigns_queued, "auto_sent": auto_sent}
+
+    # Conversations that have gone quiet: embed them, distill what the person
+    # said about their life. Here rather than at hang-up on purpose — no
+    # surface has to say goodbye correctly for its words to be remembered.
+    try:
+        from .conversations import settle_idle
+        conversations_settled = settle_idle(db)
+    except Exception:  # noqa: BLE001
+        conversations_settled = 0
+
+    return {"reclaimed": reclaimed, "campaigns_queued": campaigns_queued,
+            "auto_sent": auto_sent, "conversations_settled": conversations_settled}
 
 
 def settle_campaign_check(db: Session, task: AgentTask, result: dict,

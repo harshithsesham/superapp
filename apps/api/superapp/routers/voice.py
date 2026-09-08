@@ -10,7 +10,6 @@ The spoken "send it" carries exactly the trust of the send button: same
 authenticated user, same trust-ladder gate, same decision-ledger row.
 """
 import json
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field, field_validator
@@ -18,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import current_user_id
 from ..config import get_settings
+from ..conversations import record_turns, settle
 from ..db import get_db
 from ..kernel import record_decision
 from ..llm.provider import LLMProvider
@@ -796,6 +796,17 @@ def hello(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)
 @router.post("/converse")
 def converse(body: ConverseBody, user_id: str = Depends(current_user_id),
              db: Session = Depends(get_db)):
+    return _converse(body, user_id=user_id, db=db, surface="orb")
+
+
+def _converse(body: ConverseBody, *, user_id: str, db: Session,
+              surface: str = "orb") -> dict:
+    """The brain the orb, Telegram and the back-compat /command all share.
+
+    `surface` is the caller's own word, never the client's: it only labels the
+    stored conversation, and a request may not choose where it appears to have
+    come from.
+    """
     from ..context_notes import recent_context
     context = get_context(db, agent="hub", user_id=user_id)
     voice_inbox = _inbox_for_voice(context)
@@ -854,8 +865,22 @@ def converse(body: ConverseBody, user_id: str = Depends(current_user_id),
                  payload={"heard": "" if parsed["action_type"] in ("remember_context", "forget_context") else body.messages[-1].text[:200],
                           "said": parsed["say"][:200],
                           "action": parsed["action_type"], "screen": parsed.get("screen", "")})
-    # Durable personal context is saved explicitly above. Archiving the whole
-    # conversation here would resurrect a note the user just asked to forget.
+    # Durable on every turn, whatever the model chose. This used to fire only
+    # on `end_conversation`, so a closed app or a dropped network erased the
+    # whole exchange — and the last 12 turns it did keep were clipped to 1600
+    # characters. The transcript is stored whole now; a sign-off only means
+    # settle it NOW rather than waiting for the idle sweep to notice.
+    #
+    # Archiving the whole conversation once meant a forgotten note came back:
+    # the words survived in the transcript after `forget_context` deleted the
+    # note. `forget_conversations` now reaches these rows too, so recording
+    # here no longer outlives a person's decision to forget.
+    turns = [{"role": t.role, "text": t.text} for t in body.messages]
+    turns.append({"role": "nano", "text": parsed["say"]})
+    convo = record_turns(db, user_id=user_id, surface=surface, turns=turns)
+    if convo is not None and parsed["action_type"] == "end_conversation" \
+            and len(body.messages) > 1:
+        settle(db, convo)
     db.commit()
     return {
         "say": parsed["say"], "action": parsed["action_type"],

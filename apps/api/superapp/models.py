@@ -678,6 +678,45 @@ class InterviewTurn(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Conversation(Base):
+    """Every spoken or typed exchange with Nano, kept as it happens.
+
+    Conversations used to be second-class: the orb saved a transcript only when
+    the model chose `end_conversation`, realtime voice saved nothing at all, and
+    Telegram lived in a RAM deque that a restart erased. So "I told Nano my
+    father's name last week" was true and useless — the words were gone.
+
+    This table is the durable floor, written on EVERY turn with no model call
+    and no embedding: cheap enough that no surface has an excuse to skip it.
+    The expensive work (semantic memory, fact extraction) happens once, later,
+    when the conversation has gone quiet — see `conversations.settle`.
+
+    Deliberately NOT unique on (user, surface, external_id): the same opening
+    line recurs, and a settled conversation must never be reopened and
+    overwritten. Lookup is "the most recent unsettled row still inside the idle
+    window"; anything older starts a new conversation.
+    """
+
+    __tablename__ = "conversations"
+    __table_args__ = (
+        Index("ix_convo_lookup", "user_id", "surface", "external_id"),
+        Index("ix_convo_sweep", "settled_at", "last_turn_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    surface: Mapped[str] = mapped_column(String(16), nullable=False)  # orb | realtime | telegram
+    # The provider's own conversation id where one exists; otherwise a hash of
+    # the opening turn, which is stable for as long as the client replays it.
+    external_id: Mapped[str] = mapped_column(String(64), default="")
+    turns: Mapped[list] = mapped_column(JSON, default=list)  # [{role, text}]
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_turn_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # Stamped when memory + fact extraction have run. NULL = still open, or
+    # waiting for the sweep. Set once; a settled conversation is immutable.
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class TokenVaultEntry(Base):
     """Encrypted-at-rest OAuth credentials (Plaid, Gmail). Most sensitive table in the app.
 

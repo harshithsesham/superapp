@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from ..auth import current_user_id, resolve_token
 from ..config import get_settings
 from ..db import get_db
+from ..conversations import record_turns
 from ..memory import recall
 from ..people import people_for_turn
 from ..substrate import get_context
@@ -79,6 +80,18 @@ def realtime_token(user_id: str = Depends(current_user_id)):
     return {"token": resp.json().get("token"), "agent_id": settings.eleven_agent_id}
 
 
+def _conversation_id(body: dict, extra: dict) -> str:
+    """ElevenLabs' own conversation id when their agent is configured to pass
+    one through. Absent that, `record_turns` falls back to hashing the opening
+    turn, which is stable for as long as the transcript is replayed."""
+    for src_dict in (extra, body):
+        for key in ("conversation_id", "conversationId", "call_id"):
+            val = src_dict.get(key)
+            if isinstance(val, str) and val.strip():
+                return val.strip()[:64]
+    return ""
+
+
 def _openai_chunk(rid: str, text: str = "", finish: str | None = None) -> str:
     return "data: " + json.dumps({
         "id": rid, "object": "chat.completion.chunk", "created": int(time.time()),
@@ -110,6 +123,16 @@ async def chat_completions(request: Request, db: Session = Depends(get_db),
               "text": str(m.get("content") or "")[:2000]}
              for m in body.get("messages", []) if m.get("role") in ("user", "assistant")]
     last_user = next((t["text"] for t in reversed(turns) if t["role"] == "user"), "")
+
+    # Durable BEFORE we think about it: a hang-up mid-answer must not erase
+    # what the person just said. ElevenLabs replays the whole transcript each
+    # turn, so this overwrites the same row and grows with the conversation.
+    convo_key = _conversation_id(body, extra)
+    convo = record_turns(db, user_id=user_id, surface="realtime", turns=turns,
+                         external_id=convo_key)
+    if convo is not None:
+        db.commit()
+
     context = get_context(db, agent="hub", user_id=user_id)
     grounding = {
         "conversation": turns[-16:],
@@ -131,7 +154,7 @@ async def chat_completions(request: Request, db: Session = Depends(get_db),
     rid = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
     def stream():
-        spoken_chars = 0
+        spoken = ""  # everything actually spoken, kept so the turn can be stored
         buffered = ""  # held back once a possible action tag starts
         tag_text = ""
         in_tag = False
@@ -152,16 +175,17 @@ async def chat_completions(request: Request, db: Session = Depends(get_db),
                     if start != -1:
                         speak = buffered[:start]
                         if speak:
-                            spoken_chars += len(speak)
+                            spoken += speak
                             yield _openai_chunk(rid, speak)
                         tag_text = buffered[start:]
                         buffered = ""
                         in_tag = True
                     elif len(buffered) > 2 and not buffered.endswith("<"):
-                        spoken_chars += len(buffered)
+                        spoken += buffered
                         yield _openai_chunk(rid, buffered)
                         buffered = ""
             if buffered and not in_tag:
+                spoken += buffered
                 yield _openai_chunk(rid, buffered)
         except Exception:
             yield _openai_chunk(rid, "Sorry — say that again?")
@@ -170,9 +194,31 @@ async def chat_completions(request: Request, db: Session = Depends(get_db),
             if override.get("say"):
                 # A refused or incomplete rule is spoken, never swallowed
                 # after the model has already said "done".
+                spoken += " " + override["say"]
                 yield _openai_chunk(rid, " " + override["say"])
         yield _openai_chunk(rid, finish="stop")
         yield "data: [DONE]\n\n"
+        # The person may hang up now, and ElevenLabs would never replay this
+        # reply to us. Store it on our own session — the request's is spent.
+        _store_reply(user_id, spoken)
+
+    def _store_reply(uid: str, said: str) -> None:
+        """Append Nano's own words to the stored transcript. Best-effort: a
+        failure here must never surface in a live call."""
+        if not said.strip():
+            return
+        from ..db import SessionLocal
+
+        sdb = SessionLocal()
+        try:
+            record_turns(sdb, user_id=uid, surface="realtime",
+                         turns=turns + [{"role": "nano", "text": said.strip()}],
+                         external_id=convo_key)
+            sdb.commit()
+        except Exception:  # noqa: BLE001
+            sdb.rollback()
+        finally:
+            sdb.close()
 
     def _run_action(uid: str, tag: str) -> dict:
         """Returns the executor's override (a `say` when it refused or needs
