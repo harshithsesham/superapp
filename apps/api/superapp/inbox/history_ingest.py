@@ -15,17 +15,37 @@ from ..substrate.events import append_event
 from ..substrate.history import import_history
 from .factory import client_for
 
-HISTORY_MONTHS = 36
+HISTORY_MONTHS = 12
+
+
+def window_start(now: datetime) -> datetime:
+    """Where the import window opens, derived FROM `HISTORY_MONTHS`.
+
+    The window used to be spelled `now.replace(year=now.year - 3)` longhand
+    beside a constant that only ever reached the state dict and the event
+    payload — so changing the constant moved the window we REPORTED and not the
+    one we fetched. Deriving it means the two cannot disagree.
+
+    Walks the day back rather than assuming 28: the 31st of a month has no
+    counterpart in the month it lands on, and so does the 29th of February.
+    """
+    years, months = divmod(HISTORY_MONTHS, 12)
+    year, month = now.year - years, now.month - months
+    if month <= 0:
+        year, month = year - 1, month + 12
+    for day in range(now.day, 0, -1):
+        try:
+            return now.replace(year=year, month=month, day=day)
+        except ValueError:
+            continue
+    raise ValueError(f"no valid window start for {now!r}")
 
 
 def ensure_history_import(account) -> None:
     if account.provider not in ("gmail", "outlook") or account.history_import_state:
         return
     now = utcnow()
-    try:
-        since = now.replace(year=now.year - 3)
-    except ValueError:  # leap-day connection
-        since = now.replace(year=now.year - 3, day=28)
+    since = window_start(now)
     account.history_import_state = {
         "status": "pending", "months": HISTORY_MONTHS,
         "since": since.isoformat(), "until": now.isoformat(),

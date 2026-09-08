@@ -41,14 +41,22 @@ def state(aid):
 
 
 @pytest.mark.parametrize("provider", ["gmail", "outlook"])
-def test_three_calendar_years_fixed_once_including_leap_day(monkeypatch, provider):
+def test_history_window_fixed_once_including_leap_day(monkeypatch, provider):
+    """The window is derived from HISTORY_MONTHS rather than written out
+    longhand beside it: the constant used to reach only the state dict and the
+    event payload, so changing it moved the window we REPORTED and not the one
+    we fetched. Asserting the relationship keeps them married."""
     now = datetime(2024, 2, 29, 9, 30, tzinfo=timezone.utc)
     monkeypatch.setattr(history_ingest, "utcnow", lambda: now)
     acct = SimpleNamespace(provider=provider, history_import_state=None)
     history_ingest.ensure_history_import(acct)
-    assert acct.history_import_state["since"] == "2021-02-28T09:30:00+00:00"
+    since = datetime.fromisoformat(acct.history_import_state["since"])
+    assert since == history_ingest.window_start(now)
+    # 29 February has no counterpart in a non-leap year: walk the day back.
+    assert (since.year, since.month) == (2023, 2) and since.day == 28
+    assert since.hour == 9 and since.minute == 30
     assert acct.history_import_state["until"] == now.isoformat()
-    assert acct.history_import_state["months"] == 36
+    assert acct.history_import_state["months"] == history_ingest.HISTORY_MONTHS == 12
     original = dict(acct.history_import_state)
     monkeypatch.setattr(history_ingest, "utcnow", lambda: now.replace(year=2026, day=28))
     history_ingest.ensure_history_import(acct)
@@ -66,7 +74,7 @@ def test_connection_sets_up_history_before_first_triage(monkeypatch, provider):
     monkeypatch.setattr("superapp.inbox.factory.client_for", lambda *a: SimpleNamespace(subscribe=lambda: (None, "")))
     def think(db, **kw):
         acct = db.scalar(select(GmailAccount).where(GmailAccount.user_id == uid))
-        assert acct.history_import_state["months"] == 36
+        assert acct.history_import_state["months"] == history_ingest.HISTORY_MONTHS
         assert acct.history_import_state["status"] == "pending"
     monkeypatch.setattr(routes, "run_think", think)
     monkeypatch.setattr(routes, "render_screen", lambda *a, **kw: SimpleNamespace(model_dump=lambda: {}))
