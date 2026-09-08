@@ -23,6 +23,7 @@ from ..auth import current_user_id, resolve_token
 from ..config import get_settings
 from ..db import get_db
 from ..memory import recall
+from ..people import people_for_turn
 from ..substrate import get_context
 from ..substrate.events import append_event
 from .voice import (CONVERSE_SYSTEM, _execute, _inbox_for_voice,
@@ -115,6 +116,10 @@ async def chat_completions(request: Request, db: Session = Depends(get_db),
         "inbox": _inbox_for_voice(context),
         "nutrition": _nutrition_for_voice(context),
         "scout_tasks": _tasks_for_voice(db, user_id),
+        # Realtime carried no people graph at all, so the live voice — the one
+        # you actually talk to — could not tell you who your mentor was while
+        # the orb could. Same helper as the orb, so they cannot drift.
+        "people": people_for_turn(db, user_id, last_user),
         "remembered": recall(db, user_id=user_id, query=last_user or "today", k=4),
         "person": [f for f in context.facts if f["domain"] in ("identity", "inbox", "goals")][:12],
         "knows_person": any(f["domain"] == "identity" for f in context.facts),

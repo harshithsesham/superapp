@@ -3172,3 +3172,42 @@ def test_connecting_a_mailbox_actually_fills_it():
         InboxMessage.account_email == "stub@example.com")) or 0
     db.close()
     assert after >= before, "connecting a mailbox must never lose mail"
+
+
+def test_voice_finds_the_person_you_named_not_just_recent_ones():
+    """"Email my mentor" used to depend on the mentor having written recently:
+    grounding was the five freshest correspondents and nothing else, so anyone
+    outside that window was invisible to the composer. Realtime voice carried
+    no people at all."""
+    from superapp.models import Person, utcnow
+    from superapp.people import people_for_turn, people_matching
+    from datetime import timedelta
+
+    uid = "named-people"
+    db = SessionLocal()
+    old = utcnow() - timedelta(days=200)
+    db.add(Person(user_id=uid, email="wise@college.edu", name="Ada Speke",
+                  relationship="mentor", tone="warm", summary="Advised the thesis.",
+                  last_seen=old))
+    # ...and six people who wrote this week, which is what used to crowd her out
+    for i in range(6):
+        db.add(Person(user_id=uid, email=f"recent{i}@x.com", name=f"Recent {i}",
+                      relationship="colleague", last_seen=utcnow()))
+    db.commit()
+
+    recent_only = [p["email"] for p in people_for_turn(db, uid, "")]
+    assert "wise@college.edu" not in recent_only, "the window really does drop her"
+
+    for said in ("can you email my mentor about the reference",
+                 "send something to Ada", "write to wise@college.edu"):
+        found = [p["email"] for p in people_for_turn(db, uid, said)]
+        assert "wise@college.edu" in found, f"named but not found: {said!r}"
+        assert len(found) <= 9, "grounding stays small"
+
+    # word starts, not substrings: "can" must not drag in Duncan
+    db.add(Person(user_id=uid, email="duncan@x.com", name="Duncan Reid",
+                  relationship="plumber", last_seen=old))
+    db.commit()
+    assert people_matching(db, uid, "can you send that") == []
+    assert [p.email for p in people_matching(db, uid, "email Duncan")] == ["duncan@x.com"]
+    db.close()

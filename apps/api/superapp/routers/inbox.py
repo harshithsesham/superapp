@@ -470,8 +470,8 @@ class ImportHistoryBody(BaseModel):
 
 
 def _run_history_import(user_id: str, months: int = 36, limit: int = 1500) -> None:
-    # Compatibility for older app builds. The product window is always three
-    # years, and the paginated worker has no total-message cutoff.
+    # Compatibility for older app builds. The window is HISTORY_MONTHS, set in
+    # one place, and the paginated worker has no total-message cutoff.
     from ..inbox.history_ingest import run_history_imports
     run_history_imports(user_id=user_id, pages=4)
 

@@ -253,10 +253,12 @@ def _playbooks(db, user_id: str) -> list[dict]:
             for f in read_facts(db, user_id=user_id, domains=["playbooks"], limit=6)]
 
 
-def _people(db, user_id: str) -> list[dict]:
-    from ..people import people_for_voice
+def _people(db, user_id: str, said: str = "") -> list[dict]:
+    """The recent handful, plus anyone this turn actually named — a mentor you
+    last heard from in March is precisely who a recency window drops."""
+    from ..people import people_for_turn
 
-    return people_for_voice(db, user_id)
+    return people_for_turn(db, user_id, said)
 
 
 def _tasks_for_voice(db, user_id: str) -> list[dict]:
@@ -808,7 +810,7 @@ def converse(body: ConverseBody, user_id: str = Depends(current_user_id),
             "nutrition": _nutrition_for_voice(context),
             "scout_tasks": _tasks_for_voice(db, user_id),
             "saved_context": recent_context(db, user_id),
-            "people": _people(db, user_id),
+            "people": _people(db, user_id, body.messages[-1].text),
             "remembered": recall(db, user_id=user_id,
                                  query=body.messages[-1].text, k=4),
             "person": [f for f in context.facts if f["domain"] in ("identity", "inbox", "goals")][:12],

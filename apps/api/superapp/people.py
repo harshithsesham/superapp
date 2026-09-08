@@ -12,7 +12,7 @@ import json
 import re
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from .llm.provider import LLMProvider
@@ -148,7 +148,75 @@ def people_for_voice(db: Session, user_id: str, limit: int = 5) -> list[dict]:
     rows = db.scalars(select(Person).where(Person.user_id == user_id)
                       .order_by(Person.last_seen.desc()).limit(limit * 2))
     rows = [p for p in rows if not _SERVICE_RE.search(p.relationship or "")][:limit]
-    return [{
-        "email": p.email, "name": p.name, "relationship": p.relationship,
-        "tone": p.tone, "summary": p.summary, "facts": (p.facts or [])[:8],
-    } for p in rows]
+    return [_voice_shape(p) for p in rows]
+
+
+def _voice_shape(p: Person) -> dict:
+    return {"email": p.email, "name": p.name, "relationship": p.relationship,
+            "tone": p.tone, "summary": p.summary, "facts": (p.facts or [])[:8]}
+
+
+# The glue of asking for something. Relationship words — mentor, father,
+# landlord — are deliberately NOT here: they are exactly what a person says
+# instead of an address, and matching them is the entire point.
+_NOT_A_NAME = {
+    "email", "emails", "mail", "send", "sent", "write", "wrote", "draft",
+    "message", "reply", "replied", "tell", "ask", "asking", "about", "the",
+    "and", "for", "with", "that", "this", "them", "they", "him", "her", "his",
+    "hers", "our", "you", "your", "yours", "can", "could", "would", "should",
+    "please", "want", "need", "just", "let", "get", "make", "know", "say",
+    "said", "back", "out", "who", "what", "when", "where", "how", "one",
+    "something", "anything", "quick", "note", "line", "again", "now", "today",
+    "tomorrow", "yesterday", "morning", "evening", "thanks", "thank",
+}
+
+
+def _named_tokens(text: str) -> list[str]:
+    """Words in what the person just said that could name somebody."""
+    seen: list[str] = []
+    for tok in re.findall(r"[a-z][a-z']{2,}", (text or "").lower()):
+        if tok not in _NOT_A_NAME and tok not in seen:
+            seen.append(tok)
+    return seen[:8]   # a long sentence must not become a long OR
+
+
+def people_matching(db: Session, user_id: str, text: str, limit: int = 4) -> list[Person]:
+    """Anyone the person just NAMED, however long ago they last wrote.
+
+    `people_for_voice` alone answers "who wrote recently", which is the wrong
+    question for "email my mentor": a mentor you last heard from in March is
+    exactly the person a recency window drops. Matching is at word starts, so
+    "can" does not turn Duncan into a candidate; it errs toward offering the
+    model a choice, and a new recipient is hard-capped at ask-first in the
+    kernel, so a wrong candidate is confirmed by a human before it is mailed.
+    """
+    tokens = _named_tokens(text)
+    if not tokens:
+        return []
+    clauses = []
+    for tok in tokens:
+        starts, inner = f"{tok}%", f"% {tok}%"
+        clauses += [
+            func.lower(Person.name).like(starts), func.lower(Person.name).like(inner),
+            func.lower(Person.relationship).like(starts),
+            func.lower(Person.relationship).like(inner),
+            func.lower(Person.email).like(starts),
+        ]
+    rows = db.scalars(
+        select(Person).where(Person.user_id == user_id, or_(*clauses))
+        .order_by(Person.last_seen.desc()).limit(limit * 3))
+    return [p for p in rows if not _SERVICE_RE.search(p.relationship or "")][:limit]
+
+
+def people_for_turn(db: Session, user_id: str, text: str = "",
+                    recent: int = 5, named: int = 4) -> list[dict]:
+    """Who to put in front of the model for THIS turn: the recent handful, plus
+    anyone the person just named. Shared by the orb and realtime voice so the
+    two can never drift into knowing different people."""
+    out = people_for_voice(db, user_id, limit=recent)
+    known = {p["email"] for p in out}
+    for person in people_matching(db, user_id, text, limit=named):
+        if person.email not in known:
+            out.append(_voice_shape(person))
+            known.add(person.email)
+    return out

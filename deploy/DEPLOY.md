@@ -24,6 +24,13 @@ SUPERAPP_GOOGLE_CLIENT_ID=...
 SUPERAPP_GOOGLE_CLIENT_SECRET=...
 SUPERAPP_GOOGLE_REDIRECT_URI=https://app.yourdomain.com/v1/gmail/callback
 SUPERAPP_GMAIL_SCOPE_TIER=read        # each founder climbs deliberately
+# Outlook / Microsoft 365. Without these the app still runs, but the Microsoft
+# button never appears: /v1/mail/providers only offers a provider the server
+# holds credentials for, so a missing id is a silently absent feature.
+SUPERAPP_MICROSOFT_CLIENT_ID=...
+SUPERAPP_MICROSOFT_CLIENT_SECRET=...
+SUPERAPP_MICROSOFT_TENANT=common      # 'common' = work/school AND personal accounts
+SUPERAPP_MICROSOFT_REDIRECT_URI=https://app.yourdomain.com/v1/outlook/callback
 SUPERAPP_GMAIL_WEBHOOK_TOKEN=<long random>
 SUPERAPP_PLAID_WEBHOOK_TOKEN=<long random>
 ```
@@ -33,6 +40,19 @@ Generate random values with: `openssl rand -hex 24`
 In Google Cloud console → your OAuth client → add the new redirect URI
 `https://app.yourdomain.com/v1/gmail/callback`, and add the co-founder's
 gmail as a test user (Audience page).
+
+For Microsoft: Entra ID → App registrations → your app → Authentication → add
+`https://app.yourdomain.com/v1/outlook/callback` as a Web redirect URI, and
+Certificates & secrets for the client secret. Outlook mail arrives on the
+dispatcher tick, not by push: Graph change notifications need an endpoint that
+answers a synchronous validation handshake, which the Pub/Sub route cannot
+serve, so `subscribe()` is a deliberate no-op there.
+
+Check what a running server actually offers with:
+
+```bash
+curl -s https://app.yourdomain.com/v1/mail/providers
+```
 
 ## 3. Launch
 
