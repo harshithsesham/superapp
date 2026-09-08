@@ -70,6 +70,15 @@ def create_draft(db: Session, *, user_id: str, message_id: str, body: str,
     return draft
 
 
+def auto_reply_blocked(msg) -> str | None:
+    signals = msg.signals or {}
+    if signals.get("recovered"):
+        return "Recovered mail needs explicit review before sending."
+    if signals.get("context_incomplete"):
+        return "Related context was unavailable; review this draft before sending."
+    return None
+
+
 def draft_unsendable(draft) -> str | None:
     """Why this draft must not go out — None when it may. One rule for every
     send path (the sync gate, the arming, the deadline re-check, the rule-enable
@@ -92,6 +101,9 @@ def mark_written_by_user(draft, body: str) -> None:
     if body.strip():
         draft.generation_status = "ready"
         draft.generation_reason = ""
+        # Only this explicit user edit/review releases the private-context
+        # hold. Without it, even replacing the draft left it unsendable forever.
+        draft.used_imported_context = False
 
 
 def get_draft(db: Session, *, user_id: str, draft_id: str) -> InboxDraft:
@@ -214,12 +226,17 @@ def inbox_context(db: Session, user_id: str) -> dict:
         "primary": i == 0,
         "color": _BOX_COLORS[i % len(_BOX_COLORS)],
         "count": sum(1 for m in msgs if m.account_email == a.email),
+        "recovering": bool(a.recovery_state),
+        "sync_error": a.sync_error,
+        "last_sync_at": a.last_sync_at.isoformat() if a.last_sync_at else None,
+        "recovered_count": (a.recovery_state or {}).get("processed", 0),
         # So the app can name the mailbox honestly instead of assuming Gmail,
         # and send a reconnect back to the provider it belongs to.
         "provider": getattr(a, "provider", "") or "gmail",
     } for i, a in enumerate(_accts)]
     return {
         "connected": bool(_accts),
+        "sync_incomplete": any(a.recovery_state or a.sync_error for a in _accts),
         "mailboxes": mailboxes,
         "needs_reply": open_asks,
         "primary": primary,

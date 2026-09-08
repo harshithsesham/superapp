@@ -395,13 +395,14 @@ def test_phase3_connect_triage_tiers_and_receipts():
     # Noise is visible in Primary (that's the point) but never becomes an ask.
     assert "UNIQLO" not in str(needs) and "LinkedIn" not in str(needs)
 
-    # The receipt (Myntra order) was recognized — the Phase 4d hook.
+    # Without retrieval or a live verifier, even a plausible receipt remains
+    # visible. Offline heuristics cannot claim it was safely handled.
     db = SessionLocal()
     from superapp.models import InboxMessage
     tiers = {m.tier for m in db.query(InboxMessage).filter_by(user_id="harshith")}
-    assert "receipt" in tiers
+    assert "worth_knowing" in tiers and "cleared" not in tiers
     synced = recent_events(db, user_id="harshith", limit=5, types=["inbox_synced"])
-    assert synced[0].payload["new"] == 12 and synced[0].payload["cleared"] >= 4
+    assert synced[0].payload["new"] == 12 and synced[0].payload["cleared"] == 0
     db.close()
 
     # Re-sync is idempotent.
@@ -506,7 +507,7 @@ def test_hub_screen_projects_all_verticals():
     hero = next(c for c in cards if c["name"] == "Inbox Zero")
     assert hero["screen"] == "inbox"
     grid = next(b for sec in screen["sections"] for b in sec["blocks"] if b["type"] == "agent_grid")
-    assert {i["screen"] for i in grid["items"]} == {"home", "finance", "stylist"}
+    assert {i["screen"] for i in grid["items"]} == {"home", "finance", "stylist", "grocery"}
     assert any("kcal" in i["sub"] or "logged" in i["sub"] for i in grid["items"])
 
 
@@ -515,7 +516,7 @@ def test_hub_timeline_every_signal_ends_in_a_verdict():
     timeline = next(b for sec in screen["sections"] for b in sec["blocks"] if b["type"] == "timeline")
     assert timeline["items"], "today's mail should appear as fate lines"
     assert all(i["verdict"] for i in timeline["items"])
-    assert any(i["tone"] == "filed" for i in timeline["items"])
+    assert not any(i["tone"] == "filed" for i in timeline["items"])
     assert "signal" in timeline["footer"]
 
 
@@ -526,7 +527,7 @@ def test_decision_ledger_and_autonomy_panel():
     caps = {c["action_key"]: c for c in autonomy["capabilities"]}
     send = caps["inbox.send_reply"]
     assert send["edited"] == 1 and send["level"] == 2 and not send["promotable"]
-    assert caps["inbox.archive_noise"]["acted"] >= 1  # nano's side is counted too
+    assert caps["inbox.archive_noise"]["acted"] == 0  # offline verification cannot authorize filing
 
     # Promotion cannot be taken, only earned: 409 until the record qualifies.
     r = client.post("/v1/kernel/promote", headers=AUTH,
@@ -539,7 +540,7 @@ def test_decision_ledger_and_autonomy_panel():
                  if (sec["title"] or "").startswith("Without asking"))
     assert "earned, not configured" in panel["title"]
     rows = next(b for b in panel["blocks"] if b["type"] == "list")["items"]
-    assert any(r["id"] == "inbox.archive_noise" for r in rows)
+    assert not any(r["id"] == "inbox.archive_noise" for r in rows)
 
 
 def test_voice_orb_hello_and_conversation():
@@ -1812,6 +1813,8 @@ def test_auto_reply_window_schedules_then_sends_at_deadline(monkeypatch):
     settings.gmail_scope_tier = "send"
     autosend.TIMERS_ENABLED = False
     uid = "window-tester"
+    monkeypatch.setattr("superapp.memory.available", lambda db: True)
+    monkeypatch.setattr("superapp.memory.recall_for_agent", lambda *a, **k: [])
     _drafts_write_themselves(monkeypatch)   # the stub brain no longer writes a sendable draft
     try:
         db = SessionLocal()
@@ -2399,6 +2402,8 @@ def test_draft_missing_information_never_auto_sends(monkeypatch):
 def test_finished_draft_still_schedules(monkeypatch):
     """The gate is specific: a ready draft from a delegated sender arms as before."""
     from superapp.llm.provider import LLMResponse
+    monkeypatch.setattr("superapp.memory.available", lambda db: True)
+    monkeypatch.setattr("superapp.memory.recall_for_agent", lambda *a, **k: [])
     _model_replies_with(monkeypatch, lambda kw: LLMResponse(
         text="Thanks Priya — Tuesday at 10 works.\n\nHarshith", model="test",
         input_tokens=1, output_tokens=1))
@@ -2676,11 +2681,11 @@ def test_embedding_failure_is_never_disguised_as_a_vector():
     settings = get_settings()
     prev = settings.voyage_api_key
 
-    # No key configured: the deterministic stub is fine, but it says so.
+    # Missing credentials must not generate vectors that look semantic.
     settings.voyage_api_key = ""
     try:
-        vecs, status = memory_module.embed(["hello"])
-        assert status == "stub" and len(vecs[0]) == memory_module.DIMS
+        with _pytest.raises(memory_module.EmbeddingUnavailable):
+            memory_module.embed(["hello"])
 
         # Key configured but the provider is down: loud, not silently wrong.
         settings.voyage_api_key = "test-key"
@@ -2929,8 +2934,8 @@ def test_every_chunk_is_embedded_not_just_the_first_128():
     class _Resp:
         def __init__(self, n): self._n = n
         def raise_for_status(self): return None
-        def json(self): return {"data": [{"embedding": [0.0] * memory.DIMS}
-                                         for _ in range(self._n)]}
+        def json(self): return {"data": [{"index": i, "embedding": [0.0] * memory.DIMS}
+                                         for i in range(self._n)]}
 
     def fake_post(url, **kw):
         n = len(kw["json"]["input"])
@@ -2949,7 +2954,7 @@ def test_every_chunk_is_embedded_not_just_the_first_128():
         settings.voyage_api_key = prev
 
 
-def test_a_reply_never_quotes_another_correspondent():
+def test_a_reply_never_quotes_another_correspondent(monkeypatch):
     """Recall for a reply is driven by the SENDER'S own words, and the result
     is fed into a reply addressed back to them. Past mail is therefore
     admitted only when it involves this correspondent or this thread, and a
@@ -2983,6 +2988,7 @@ def test_a_reply_never_quotes_another_correspondent():
              "domain": "knowledge", "kind": "note", "degraded": False},
         ]
 
+    monkeypatch.setattr(memory, "available", lambda db: True)
     orig = memory.recall_for_agent
     memory.recall_for_agent = fake_recall
     try:

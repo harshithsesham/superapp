@@ -198,7 +198,28 @@ export type ActionRow = {
   actions: Action[];
 };
 
-export type LeafBlock = TextBlock | InsightCard | StatRow | ImageCard | ListBlock | ImageGrid | OutfitCard | AgentCard | AgentGrid | DraftCard | Timeline | MeterRow | BarChart | DayStrip | RingHero | ActionRow;
+export type ShelfItem = {
+  id: string;
+  name: string;
+  image_url?: string | null;
+  badge?: string | null;
+  status?: "stocked" | "running_low" | "out";
+};
+
+export type Shelf = {
+  label: string;
+  // Category shelves are wood; the two computed shelves carry their own tone
+  // so the eye finds them without reading.
+  tone?: "wood" | "amber" | "rose";
+  items: ShelfItem[];
+};
+
+export type ShelfBlock = {
+  type: "shelf";
+  shelves: Shelf[];
+};
+
+export type LeafBlock = TextBlock | InsightCard | StatRow | ImageCard | ListBlock | ImageGrid | OutfitCard | AgentCard | AgentGrid | DraftCard | Timeline | MeterRow | BarChart | DayStrip | RingHero | ShelfBlock | ActionRow;
 
 export type Section = {
   type: "section";

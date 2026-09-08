@@ -230,7 +230,18 @@ class OutlookClient:
                 break
         return out
 
-    def history(self, *, months: int = 24, limit: int = 1500) -> list[dict]:
+    def history_page(self, *, since: datetime, until: datetime, page_token: str = "") -> tuple[list[dict], str]:
+        if not self._me_address:
+            self.address()
+        params = {} if page_token else {
+            "$filter": f"receivedDateTime ge {since.strftime('%Y-%m-%dT%H:%M:%SZ')} and receivedDateTime lt {until.strftime('%Y-%m-%dT%H:%M:%SZ')}",
+            "$orderby": "receivedDateTime desc", "$top": 50, "$select": MESSAGE_FIELDS}
+        data = self._get(page_token or "/me/messages", **params)
+        messages = [parsed for raw in data.get("value", [])
+                    if (parsed := self._parse(raw, queue=False))]
+        return messages, data.get("@odata.nextLink", "")
+
+    def history(self, *, months: int = 36, limit: int = 1500) -> list[dict]:
         """Past conversation for the record: sent AND received, inbox and
         archive. Deliberately not `backfill` — nothing here is ever triaged,
         drafted for or replied to, which is what makes importing years of

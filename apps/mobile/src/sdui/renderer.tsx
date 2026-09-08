@@ -337,6 +337,39 @@ function ExpandableRow({
   );
 }
 
+const sh = StyleSheet.create({
+  wrap: { marginTop: 6, gap: 18 },
+  shelf: { borderRadius: 14, paddingTop: 10, paddingHorizontal: 8 },
+  // Warm paper for the category shelves; the two computed shelves get a wash
+  // of colour so "out of stock" is legible before the label is read.
+  wood: { backgroundColor: "#FBF7F0" },
+  amber: { backgroundColor: "#FDF1DF" },
+  rose: { backgroundColor: "#FBE4E4" },
+  tag: {
+    alignSelf: "flex-start", backgroundColor: "#FFFFFF", borderRadius: 8,
+    paddingHorizontal: 10, paddingVertical: 4, marginBottom: 8,
+    borderWidth: 1, borderColor: "#E8E3DA",
+  },
+  tagText: { fontSize: 12, color: "#4A463F", fontWeight: "600" },
+  row: { gap: 14, paddingHorizontal: 4, alignItems: "flex-end" },
+  item: { width: 76, alignItems: "center" },
+  image: { width: 64, height: 64, marginBottom: 4 },
+  placeholder: {
+    borderRadius: 12, backgroundColor: "#ECEAE6",
+    alignItems: "center", justifyContent: "center",
+  },
+  placeholderText: { fontSize: 22, color: "#8A8781", fontWeight: "600" },
+  name: { fontSize: 11, color: "#4A463F", textAlign: "center" },
+  badge: { fontSize: 10, marginTop: 2, fontWeight: "600" },
+  badgeLow: { color: "#B4761A" },
+  badgeOut: { color: "#C0392B" },
+  // The plank the items stand on.
+  plank: {
+    height: 8, borderRadius: 3, backgroundColor: "#E3D5BE", marginTop: 6,
+    marginBottom: 10, marginHorizontal: -4,
+  },
+});
+
 const cn = StyleSheet.create({
   chip: {
     fontFamily: "JetBrainsMono_400Regular",
@@ -614,6 +647,77 @@ function Block({ block, ctx }: { block: LeafBlock; ctx: RenderCtx }) {
           {block.items.map((item) => (
             <ExpandableRow key={item.id} item={item} dark={dark} onFix={ctx.onFix} />
           ))}
+        </View>
+      );
+
+    case "shelf":
+      // The design's wooden shelving. Each shelf is a plank with its items
+      // standing on it; the two computed shelves (Running low, Out of stock)
+      // carry a tint so they read before the label does.
+      return (
+        <View style={sh.wrap}>
+          {block.shelves.map((shelf, si) => {
+            const tone = shelf.tone ?? "wood";
+            return (
+              <View key={`${shelf.label}-${si}`} style={[sh.shelf, sh[tone]]}>
+                <View style={sh.tag}>
+                  <Text style={sh.tagText} numberOfLines={1}>
+                    {shelf.label}
+                  </Text>
+                </View>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={sh.row}
+                >
+                  {shelf.items.map((item) => {
+                    const uri = item.image_url
+                      ? item.image_url.startsWith("/")
+                        ? `${media?.baseUrl ?? ""}${item.image_url}`
+                        : item.image_url
+                      : null;
+                    return (
+                      <Pressable
+                        key={item.id}
+                        style={sh.item}
+                        onPress={() => onReaction("action_tapped", `grocery.item:${item.id}`)}
+                      >
+                        {uri ? (
+                          <Image
+                            source={{ uri, headers: media?.headers }}
+                            style={sh.image}
+                            resizeMode="contain"
+                          />
+                        ) : (
+                          // No photo yet: the first letter beats an empty box.
+                          <View style={[sh.image, sh.placeholder]}>
+                            <Text style={sh.placeholderText}>
+                              {(item.name[0] ?? "?").toUpperCase()}
+                            </Text>
+                          </View>
+                        )}
+                        <Text style={sh.name} numberOfLines={1}>
+                          {item.name}
+                        </Text>
+                        {item.badge ? (
+                          <Text
+                            style={[
+                              sh.badge,
+                              item.status === "out" ? sh.badgeOut : sh.badgeLow,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {item.badge}
+                          </Text>
+                        ) : null}
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+                <View style={sh.plank} />
+              </View>
+            );
+          })}
         </View>
       );
 

@@ -19,6 +19,7 @@ router = APIRouter(prefix="/v1", tags=["screens"])
 # only exists for the chat surface (Phase 5), not for screens.
 SCREEN_AGENTS = {"hub": "hub", "home": "nutrition", "finance": "finance",
                  "stylist": "stylist", "inbox": "inbox",
+                 "grocery": "grocery",
                  # flights/profile are native client screens; hub supplies theme
                  "flights": "hub", "profile": "hub"}
 

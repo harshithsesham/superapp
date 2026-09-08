@@ -116,8 +116,13 @@ class Settings(BaseSettings):
     apns_bundle_id: str = "com.harshith.superapp"
     apns_sandbox: bool = False
 
-    # Voyage embeddings for semantic recall. Empty key = deterministic stub.
+    # Voyage embeddings for semantic recall. Empty key = pending indexing,
+    # lexical-only retrieval, and no autonomous clearing based on that context.
     voyage_api_key: str = ""
+    # Instacart Developer Platform. Server-wide, not per user: the API builds a
+    # shareable basket link and needs no consumer sign-in. Empty means the
+    # handoff is unavailable and the connect screen says so.
+    instacart_api_key: str = ""
 
     # The attention budget's hard floor (full budget logic is step 5): Nano
     # never interrupts more than this many times a day.

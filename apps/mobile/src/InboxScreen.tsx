@@ -62,6 +62,7 @@ type HandledCat = { name: string; n: string; count: number };
 type Mailbox = { email: string; primary: boolean; color: string; count: number };
 type InboxState = {
   connected: boolean; synced_at: string | null; mailboxes?: Mailbox[];
+  sync_incomplete?: boolean;
   reauth: { needed: boolean; email: string; auth_url: string | null } | null;
   needs_reply: Ask[]; worth_knowing: Note[];
   handled_count: number; handled_categories: HandledCat[];
@@ -300,6 +301,12 @@ export function InboxScreen({
             />
           }
         >
+          {state.sync_incomplete ? (
+            <View style={s.reauth}>
+              <Text style={s.reauthTitle}>Mail sync is incomplete</Text>
+              <Text style={s.reauthBody}>Nano is catching up. More messages may still need your attention. Pull to refresh to retry.</Text>
+            </View>
+          ) : null}
           {state.reauth?.needed ? (
             <View style={s.reauth}>
               <Text style={s.reauthTitle}>Google signed Nano out</Text>
@@ -317,7 +324,7 @@ export function InboxScreen({
             <Text style={s.count}>{openAsks.length}</Text>
           </View>
           {asks.length === 0 ? (
-            <Text style={s.empty}>Nothing needs your words right now.</Text>
+            <Text style={s.empty}>{state.sync_incomplete ? "Still checking for messages that need you." : "Nothing needs your words right now."}</Text>
           ) : (
             <View style={{ gap: 10 }}>
               {asks.map((a, i) => {

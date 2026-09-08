@@ -48,6 +48,8 @@ def _connect(db: Session, *, user_id: str, email: str, token: dict,
         pass
     append_event(db, user_id=user_id, type="gmail_connected", agent="inbox", domain="inbox",
                  payload={"email": email, "provider": provider})
+    from ..inbox.history_ingest import ensure_history_import
+    ensure_history_import(acct)
     # Initial backfill + triage (the onboarding "scan" moment).
     # kind, not reason: the sync branches on kind, so announcing the intent
     # in reason left a freshly linked mailbox empty until new mail arrived.
@@ -88,7 +90,7 @@ def gmail_auth_url(user_id: str = Depends(current_user_id)):
 
 
 @router.get("/gmail/callback")
-def gmail_callback(code: str, state: str = "", db: Session = Depends(get_db)):
+def gmail_callback(code: str, background: BackgroundTasks, state: str = "", db: Session = Depends(get_db)):
     """OAuth redirect target (browser; Google can't send our bearer). Identity
     comes from the HMAC-signed state we generated in auth-url."""
     user_id = _verify_state(state)
@@ -99,6 +101,8 @@ def gmail_callback(code: str, state: str = "", db: Session = Depends(get_db)):
     from ..agents.inbox import _heal_reauth
     _heal_reauth(db, user_id)
     db.commit()
+    from ..inbox.history_ingest import run_history_imports
+    background.add_task(run_history_imports, user_id=user_id, pages=4)
     return HTMLResponse(f"""<!doctype html><meta charset='utf-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
 <body style='font-family:-apple-system,sans-serif;background:#08070E;color:#F4F2FA;
@@ -131,7 +135,7 @@ def outlook_auth_url(user_id: str = Depends(current_user_id)):
 
 
 @router.get("/outlook/callback")
-def outlook_callback(code: str = "", state: str = "", error: str = "",
+def outlook_callback(background: BackgroundTasks, code: str = "", state: str = "", error: str = "",
                      error_description: str = "", db: Session = Depends(get_db)):
     """OAuth redirect target for Microsoft. Identity comes from the same
     HMAC-signed state Gmail uses, because the browser cannot send our bearer.
@@ -155,6 +159,8 @@ def outlook_callback(code: str = "", state: str = "", error: str = "",
             "Microsoft didn't say which mailbox that was.", ok=False))
     _connect(db, user_id=user_id, email=email, token=token, provider="outlook")
     db.commit()
+    from ..inbox.history_ingest import run_history_imports
+    background.add_task(run_history_imports, user_id=user_id, pages=4)
     return HTMLResponse(_connected_page(f"{email} connected"))
 
 
@@ -425,12 +431,14 @@ def inbox_state(user_id: str = Depends(current_user_id), db: Session = Depends(g
     return {
         "connected": data.get("connected", False),
         "mailboxes": data.get("mailboxes", []),
+        "sync_incomplete": data.get("sync_incomplete", False),
         "reauth": reauth,
         "auto_reply_kinds": auto_kinds,
         "auto_reply_senders": auto_senders,
         "priority_kinds": list(prio_kinds),
         "priority_senders": list(prio_senders),
-        "synced_at": last_sync.created_at.isoformat() if last_sync else None,
+        "synced_at": (last_sync.created_at.isoformat()
+                      if last_sync and not data.get("sync_incomplete") else None),
         "needs_reply": data.get("needs_reply", []),
         "worth_knowing": data.get("worth_knowing", []),
         "handled_count": sum(c["count"] for c in categories),
@@ -457,71 +465,15 @@ def backfill_inbox(background: BackgroundTasks,
 
 
 class ImportHistoryBody(BaseModel):
-    months: int = Field(24, ge=1, le=120)
+    months: int = Field(36, ge=1, le=120)
     limit: int = Field(1500, ge=1, le=20000)
 
 
-def _run_history_import(user_id: str, months: int, limit: int) -> None:
-    """Read past mail into the record. Deliberately not `think()`: nothing here
-    triages, drafts, archives or sends, and it must stay that way."""
-    from ..db import SessionLocal
-    from ..llm.provider import LLMProvider
-    from ..substrate.history import import_history
-    from ..substrate.inbox import accounts as _accounts
-
-    db = SessionLocal()
-    try:
-        # One import per person at a time. Two overlapping runs fight over the
-        # same message ids, and the loser dies on a uniqueness violation after
-        # doing all the work. The lock is held for this transaction only, so a
-        # crash can never wedge someone out of importing again.
-        if db.get_bind().dialect.name == "postgresql":
-            from sqlalchemy import text as _text
-            got = db.execute(_text("SELECT pg_try_advisory_xact_lock(hashtext(:k))"),
-                             {"k": f"history_import:{user_id}"}).scalar()
-            if not got:
-                append_event(db, user_id=user_id, type="history_import_skipped",
-                             agent="inbox", domain="inbox",
-                             payload={"why": "an import is already running"})
-                db.commit()
-                return
-
-        provider = LLMProvider()
-        total = {"seen": 0, "recorded": 0, "chunks": 0, "people": 0}
-        failed: list[str] = []
-        from ..inbox.base import MailError
-        from ..inbox.factory import client_for
-        for acct in _accounts(db, user_id):
-            try:
-                client = client_for(db, user_id, acct)
-            except MailError:
-                continue   # a disconnected mailbox has nothing to import
-            try:
-                msgs = client.history(months=months, limit=limit)
-                stats = import_history(db, user_id=user_id, account_email=acct.email,
-                                       messages=msgs, provider=provider)
-            except Exception as exc:  # noqa: BLE001
-                # One unreachable mailbox must not discard the mail already
-                # recorded from the others. Keep what worked, say what didn't.
-                db.rollback()
-                failed.append(acct.email)
-                append_event(db, user_id=user_id, type="history_import_failed",
-                             agent="inbox", domain="inbox",
-                             payload={"account": acct.email, "error": type(exc).__name__})
-                db.commit()
-                continue
-            for k in total:
-                total[k] += stats.get(k, 0)
-            db.commit()   # each mailbox's work is durable on its own
-        append_event(db, user_id=user_id, type="history_imported", agent="inbox",
-                     domain="inbox", payload={**total, "months": months,
-                                              "failed_accounts": failed})
-        db.commit()
-    except Exception:  # noqa: BLE001
-        db.rollback()
-        raise
-    finally:
-        db.close()
+def _run_history_import(user_id: str, months: int = 36, limit: int = 1500) -> None:
+    # Compatibility for older app builds. The product window is always three
+    # years, and the paginated worker has no total-message cutoff.
+    from ..inbox.history_ingest import run_history_imports
+    run_history_imports(user_id=user_id, pages=4)
 
 
 @router.post("/inbox/import/history")
@@ -539,8 +491,8 @@ def import_mail_history(body: ImportHistoryBody, background: BackgroundTasks,
     """
     if not accounts_exist(db, user_id):
         raise HTTPException(status_code=409, detail="Connect a mailbox first.")
-    background.add_task(_run_history_import, user_id, body.months, body.limit)
-    return {"ok": True, "started": True, "months": body.months,
+    background.add_task(_run_history_import, user_id)
+    return {"ok": True, "started": True, "months": 36,
             "note": "Import is read-only: nothing in it is triaged, replied to or archived."}
 
 
@@ -717,8 +669,8 @@ def send_matching_pending_drafts(db: Session, user_id: str, *,
             continue  # the loop backstop: this thread has had its auto-replies today
         if not assess("inbox.auto_reply", provenance="user").allowed:
             continue
-        from ..substrate.inbox import draft_unsendable
-        if draft_unsendable(d):
+        from ..substrate.inbox import auto_reply_blocked, draft_unsendable
+        if draft_unsendable(d) or auto_reply_blocked(msg):
             continue  # a refusal, a failure, a legacy stub, or no words at all never sends
         if has_placeholder(d.body):
             continue  # a [time]-style blank is unfinished writing; the user fills it

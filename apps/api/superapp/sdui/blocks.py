@@ -220,6 +220,30 @@ class DraftCard(BaseModel):
     why_detail: str | None = None  # expandable "WHY I WROTE THIS" rationale
 
 
+class ShelfItem(BaseModel):
+    id: str
+    name: str
+    image_url: str | None = None
+    badge: str | None = None          # "2 days left", "overdue by 4 days"
+    status: Literal["stocked", "running_low", "out"] = "stocked"
+
+
+class Shelf(BaseModel):
+    """One plank. Category shelves are wood; the two computed shelves at the
+    bottom carry their own tone so the eye finds them without reading."""
+    label: str
+    tone: Literal["wood", "amber", "rose"] = "wood"
+    items: list[ShelfItem] = Field(default_factory=list)
+
+
+class ShelfBlock(BaseModel):
+    """The grocery shelf. Additive: a client that does not know this block
+    ignores it, so shipping the API ahead of the screen is safe."""
+
+    type: Literal["shelf"] = "shelf"
+    shelves: list[Shelf] = Field(default_factory=list)
+
+
 class Action(BaseModel):
     id: str  # posted back to /v1/actions when tapped; irreversible things require this tap
     label: str
@@ -232,7 +256,7 @@ class ActionRow(BaseModel):
 
 
 LeafBlock = Annotated[
-    Union[TextBlock, InsightCard, StatRow, ImageCard, ListBlock, ImageGrid, OutfitCard, AgentCard, AgentGrid, DraftCard, Timeline, MeterRow, BarChart, DayStrip, RingHero, ActionRow],
+    Union[TextBlock, InsightCard, StatRow, ImageCard, ListBlock, ImageGrid, OutfitCard, AgentCard, AgentGrid, DraftCard, Timeline, MeterRow, BarChart, DayStrip, RingHero, ShelfBlock, ActionRow],
     Field(discriminator="type"),
 ]
 

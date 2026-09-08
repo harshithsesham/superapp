@@ -291,6 +291,14 @@ def dispatch(db: Session = Depends(get_db)):
     stuck tasks, retry the retryable, queue due campaign checks."""
     out = dispatch_tick(db)
     db.commit()
+    from ..inbox.recovery import resume_recoveries
+    out["mail_recoveries_resumed"] = resume_recoveries()
+    from ..inbox.history_ingest import run_history_imports
+    from ..context_notes import index_saved_context
+    out["history_pages_imported"] = run_history_imports()
+    out["context_notes_indexed"] = index_saved_context()
+    from ..agents.grocery import scan_pending_receipts
+    out["grocery_users_scanned"] = scan_pending_receipts()
     return out
 
 

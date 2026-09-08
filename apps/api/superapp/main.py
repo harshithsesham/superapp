@@ -7,9 +7,9 @@ from fastapi.responses import JSONResponse
 from .inbox.base import MailError
 
 from . import models  # noqa: F401 — register tables
-from .agents import finance, hub, inbox, nutrition, orchestrator, stylist  # noqa: F401 — register agents
+from .agents import finance, grocery, hub, inbox, nutrition, orchestrator, stylist  # noqa: F401 — register agents
 from .db import Base, engine
-from .routers import auth as auth_router, interview as interview_router, finance as finance_router, inbox as inbox_router, nutrition as nutrition_router, screen, stylist as stylist_router, kernel as kernel_router, voice as voice_router, realtime as realtime_router, tasks as tasks_router, telegram as telegram_router, whatsapp as whatsapp_router
+from .routers import grocery as grocery_router, auth as auth_router, interview as interview_router, finance as finance_router, inbox as inbox_router, nutrition as nutrition_router, screen, stylist as stylist_router, kernel as kernel_router, voice as voice_router, realtime as realtime_router, tasks as tasks_router, telegram as telegram_router, whatsapp as whatsapp_router
 
 
 @asynccontextmanager
@@ -39,6 +39,7 @@ def _mail_error(request, exc: MailError):
                         content={"detail": str(exc), "reconnect": True})
 app.include_router(screen.router)
 app.include_router(nutrition_router.router)
+app.include_router(grocery_router.router)
 app.include_router(finance_router.router)
 app.include_router(stylist_router.router)
 app.include_router(inbox_router.router)

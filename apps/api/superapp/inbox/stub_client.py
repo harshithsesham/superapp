@@ -100,7 +100,10 @@ class StubMailClient:
     def backfill(self, n: int = 40) -> list[dict]:
         return []
 
-    def history(self, *, months: int = 24, limit: int = 1500) -> list[dict]:
+    def history_page(self, *, since: datetime, until: datetime, page_token: str = "") -> tuple[list[dict], str]:
+        return [], ""
+
+    def history(self, *, months: int = 36, limit: int = 1500) -> list[dict]:
         return []   # a fake mailbox has no past worth recording
 
     # -- writing -------------------------------------------------------------

@@ -14,6 +14,7 @@ What the record buys, that headers alone never could:
     the import ran.
 """
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -62,7 +63,7 @@ def record_message(db: Session, *, user_id: str, account_email: str,
 
 def import_history(db: Session, *, user_id: str, account_email: str,
                    messages: list[dict], provider=None,
-                   enrich_recent: int = ENRICH_RECENT) -> dict:
+                   enrich_recent: int = ENRICH_RECENT, mail_provider: str = "gmail") -> dict:
     """Import past conversation. Records it, remembers it, and dates it.
 
     Explicitly does NOT: triage, draft, archive, send, or touch the queue. The
@@ -93,8 +94,10 @@ def import_history(db: Session, *, user_id: str, account_email: str,
                 db, user_id=user_id, domain="inbox", kind="mail",
                 ref_id=f"mail:{row.gmail_msg_id}",
                 content=f"Subject: {row.subject}\n({who})\n\n{body}",
-                source="gmail", author=row.from_addr, title=row.subject,
-                source_ref=f"https://mail.google.com/mail/u/0/#all/{row.gmail_msg_id}",
+                source=mail_provider, author=row.from_addr, title=row.subject,
+                source_ref=(f"https://outlook.office.com/mail/deeplink/read/{quote(row.gmail_msg_id, safe='')}"
+                            if mail_provider == "outlook" else
+                            f"https://mail.google.com/mail/u/0/#all/{row.gmail_msg_id}"),
                 event_at=row.occurred_at)
 
         if provider is None:
@@ -132,7 +135,7 @@ def sender_history(db: Session, *, user_id: str, addr: str) -> dict:
     # Recipients live in one comma-joined column, so match the WHOLE address
     # between delimiters. An unanchored substring lets "s@x.com" inherit
     # "boss@x.com"'s history, and underscores are wildcards in LIKE.
-    replied_to = func.concat(",", func.lower(MailHistory.to_addrs), ",").contains(
+    replied_to = ("," + func.lower(MailHistory.to_addrs) + ",").contains(
         f",{addr},", autoescape=True)
     inbound = db.scalar(select(func.count()).select_from(MailHistory).where(
         MailHistory.user_id == user_id, same_sender,

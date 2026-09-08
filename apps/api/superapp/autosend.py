@@ -46,8 +46,8 @@ def schedule(db: Session, *, draft: InboxDraft, msg: InboxMessage, gate_tier: in
     activity, the fallback push and the timer all wait for the caller's
     commit, so a sync that rolls back never announces a window that does not
     exist and a timer never fires into an uncommitted row."""
-    from .substrate.inbox import draft_unsendable
-    why = draft_unsendable(draft)
+    from .substrate.inbox import auto_reply_blocked, draft_unsendable
+    why = draft_unsendable(draft) or auto_reply_blocked(msg)
     if why:
         raise ValueError(f"only a finished draft can be scheduled to send itself: {why}")
     from .substrate import append_event
@@ -272,8 +272,8 @@ def _send_one(db: Session, d: InboxDraft) -> bool:
     if settings.gmail_scope_tier not in ("send", "modify"):
         _hold(db, d, msg, "sending is off")
         return False
-    from .substrate.inbox import draft_unsendable
-    why = draft_unsendable(d)
+    from .substrate.inbox import auto_reply_blocked, draft_unsendable
+    why = draft_unsendable(d) or auto_reply_blocked(msg)
     if why:
         _hold(db, d, msg, why)   # legacy rows, or a status changed after arming
         return False

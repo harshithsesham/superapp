@@ -142,6 +142,10 @@ def hub_render(context: ContextSlice) -> Screen:
 
     grid = AgentGrid(items=[
         AgentGridItem(
+            screen="grocery", name="Groceries", tone="mint",
+            sub="Your shelf and shopping list",
+        ),
+        AgentGridItem(
             screen="home", name="Nutrition", tone="mint",
             sub=f"{kcal} kcal · {n_meals} meal{'s' if n_meals != 1 else ''} today"
             if n_meals else "Nothing logged today",

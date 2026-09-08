@@ -34,6 +34,9 @@ RISK_TIERS = {
     "inbox.auto_reply_rule": 2,   # creating the standing rule itself
     "scout.campaign": 1,          # recurring errand on the user's own ask
     "finance.move_money": 3,
+    "grocery.build_basket": 0,    # assembling a list commits to nothing
+    "grocery.place_order": 3,     # spends the person's money: never autonomous
+
 }
 
 

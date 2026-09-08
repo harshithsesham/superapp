@@ -7,13 +7,10 @@ dev/test environments recall nothing. Callers must treat an empty recall as
 `available()`, which exists so an eval can refuse to score rather than
 silently measure a system with its memory switched off.
 
-Embeddings come from Voyage (voyage-3.5-lite, 1024 dims). Without a key the
-deterministic hash stub keeps the path exercisable offline — but a stub vector
-carries no meaning, so rows written with one are marked `stub` and rows whose
-embedding call FAILED are marked `pending` and kept for retry. Nothing pretends
-a hash is a semantic vector.
+Embeddings come from Voyage (voyage-3.5-lite, 1024 dims). Missing credentials
+or a provider failure leave text pending for retry and available to lexical
+search. Legacy stub vectors are excluded from semantic search and retried.
 """
-import hashlib
 import json
 import math
 import re
@@ -36,51 +33,34 @@ class EmbeddingUnavailable(RuntimeError):
     """The embedding provider was configured but did not answer."""
 
 
-def _stub_embed(texts: list[str]) -> list[list[float]]:
-    out = []
-    for t in texts:
-        seed = hashlib.sha256(t.lower().encode()).digest()
-        vec = []
-        for i in range(DIMS):
-            h = hashlib.sha256(seed + i.to_bytes(2, "big")).digest()
-            vec.append(int.from_bytes(h[:4], "big") / 2**31 - 1.0)
-        norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-        out.append([v / norm for v in vec])
-    return out
-
-
-def embed(texts: list[str]) -> tuple[list[list[float]], str]:
-    """Returns (vectors, status). status is 'ok' for real embeddings, 'stub'
-    when no key is configured, and raises when a configured provider fails —
-    the caller stores the text and retries rather than inventing a vector."""
+def embed(texts: list[str], *, input_type: str = "document") -> tuple[list[list[float]], str]:
+    """All batches or an explicit failure; never return fabricated vectors."""
     if not texts:
         return [], "ok"
     settings = get_settings()
     if not settings.voyage_api_key:
-        return _stub_embed(texts), "stub"
-    # Voyage caps a request at 128 inputs. Slicing to the first 128 and
-    # returning them would be silent data loss: the caller zips vectors
-    # against chunks, so everything past the 128th is dropped while the
-    # import reports it stored. Page instead, and refuse to return a short
-    # list — a caller that cannot embed everything keeps the text pending.
-    out: list[list[float]] = []
+        raise EmbeddingUnavailable("No embedding provider configured")
     try:
-        for i in range(0, len(texts), 128):
+        vectors = []
+        for offset in range(0, len(texts), 128):
+            batch = texts[offset:offset + 128]
             resp = httpx.post(
                 "https://api.voyageai.com/v1/embeddings",
                 headers={"Authorization": f"Bearer {settings.voyage_api_key}"},
-                json={"model": "voyage-3.5-lite", "input": texts[i:i + 128],
-                      "output_dimension": DIMS},
-                timeout=30,
-            )
+                json={"model": "voyage-3.5-lite", "input": batch,
+                      "input_type": input_type, "output_dimension": DIMS}, timeout=30)
             resp.raise_for_status()
-            out += [d["embedding"] for d in resp.json()["data"]]
-        if len(out) != len(texts):
-            raise EmbeddingUnavailable(
-                f"embedded {len(out)} of {len(texts)} chunks")
-        return out, "ok"
-    except httpx.HTTPError as e:
-        raise EmbeddingUnavailable(str(e)) from e
+            rows = sorted(resp.json()["data"], key=lambda d: d["index"])
+            if [d["index"] for d in rows] != list(range(len(batch))):
+                raise ValueError("Incomplete embedding batch")
+            for row in rows:
+                vec = row["embedding"]
+                if len(vec) != DIMS or not all(math.isfinite(x) for x in vec):
+                    raise ValueError("Invalid embedding vector")
+                vectors.append(vec)
+        return vectors, "ok"
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
+        raise EmbeddingUnavailable("Embedding request failed or returned incomplete data") from e
 
 
 def available(db: Session) -> bool:
@@ -199,7 +179,7 @@ def retry_pending(db: Session, *, user_id: str | None = None, limit: int = 200) 
     cost latency, never silent holes in what can be found."""
     if not available(db):
         return 0
-    where = "embed_status = 'pending'" + (" AND user_id = :u" if user_id else "")
+    where = "embed_status IN ('pending', 'stub')" + (" AND user_id = :u" if user_id else "")
     rows = db.execute(text(f"SELECT id, content FROM memory_chunks WHERE {where} LIMIT :n"),
                       {"n": limit, **({"u": user_id} if user_id else {})}).mappings().all()
     if not rows:
@@ -227,30 +207,43 @@ def recall(db: Session, *, user_id: str, query: str, k: int = 5,
     """
     if not available(db) or not (query or "").strip():
         return []
+    db.info["memory_retrieval_degraded"] = False
     domain_filter = "AND domain = ANY(:doms)" if domains else ""
     dom = {"doms": domains} if domains else {}
-    cols = ("id, domain, kind, content, created_at, event_at, source, author, "
+    # A healthy query embedding does not mean the source index has caught up.
+    # Pending sources may match only by meaning, so callers must retain the
+    # incomplete-context hold until this user's permitted sources are indexed.
+    db.info["memory_retrieval_degraded"] = bool(db.scalar(text(f"""
+        SELECT EXISTS(SELECT 1 FROM memory_chunks
+          WHERE user_id = :u AND embed_status <> 'ok' {domain_filter})
+    """), {"u": user_id, **dom}))
+    cols = ("id, ref_id, domain, kind, content, created_at, event_at, source, author, "
             "title, source_ref, project, embed_status")
 
     try:
-        vecs, _ = embed([query[:2000]])
+        vecs, _ = embed([query[:2000]], input_type="query")
         dense = db.execute(text(f"""
             SELECT {cols} FROM memory_chunks
-            WHERE user_id = :u AND embed_status <> 'pending' {domain_filter}
+            WHERE user_id = :u AND embed_status = 'ok' {domain_filter}
             ORDER BY embedding <=> (:e)::vector
             LIMIT 20
         """), {"u": user_id, "e": json.dumps(vecs[0]), **dom}).mappings().all()
     except EmbeddingUnavailable:
+        db.info["memory_retrieval_degraded"] = True
         dense = []   # lexical still works; the caller sees fewer, not wrong, results
 
+    # A subject plus body is not an AND query: one unrelated word must not
+    # exclude a relevant project note when dense search is unavailable.
+    terms = list(dict.fromkeys(re.findall(r"[^\W_]+", query.lower())))[:40]
+    lexical_query = " | ".join(terms) or "nanonomatch"
     lexical = db.execute(text(f"""
         SELECT {cols} FROM memory_chunks
         WHERE user_id = :u {domain_filter}
-          AND to_tsvector('english', content) @@ plainto_tsquery('english', :q)
+          AND to_tsvector('english', content) @@ to_tsquery('english', :q)
         ORDER BY ts_rank(to_tsvector('english', content),
-                         plainto_tsquery('english', :q)) DESC
+                         to_tsquery('english', :q)) DESC
         LIMIT 20
-    """), {"u": user_id, "q": query[:500], **dom}).mappings().all()
+    """), {"u": user_id, "q": lexical_query, **dom}).mappings().all()
 
     scores: dict = {}
     rows_by_id: dict = {}
@@ -265,11 +258,11 @@ def recall(db: Session, *, user_id: str, query: str, k: int = 5,
         r = rows_by_id[i]
         when = r["event_at"] or r["created_at"]
         out.append({
-            "domain": r["domain"], "kind": r["kind"], "content": r["content"],
+            "domain": r["domain"], "kind": r["kind"], "content": r["content"], "ref_id": r["ref_id"],
             "when": when.isoformat() if when else "",
             "source": r["source"], "author": r["author"], "title": r["title"],
             "source_ref": r["source_ref"], "project": r["project"],
-            "degraded": r["embed_status"] != "ok",
+            "degraded": r["embed_status"] != "ok" or db.info["memory_retrieval_degraded"],
             "score": round(scores[i], 4),
         })
     return out

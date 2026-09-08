@@ -37,6 +37,7 @@ import { FlightsScreen } from "./src/FlightsScreen";
 import { HubScreen } from "./src/HubScreen";
 import { InboxScreen } from "./src/InboxScreen";
 import { ProfileScreen } from "./src/ProfileScreen";
+import { GroceryScreen, type GroceryAction } from "./src/GroceryScreen";
 import { BriefPlayer } from "./src/BriefPlayer";
 import Svg, { Path, Rect } from "react-native-svg";
 import { SduiScreen } from "./src/sdui/renderer";
@@ -69,7 +70,7 @@ Notifications.setNotificationHandler({
   }),
 });
 
-const SCREENS = ["hub", "inbox", "home", "finance", "stylist", "flights", "profile"] as const;
+const SCREENS = ["hub", "inbox", "home", "finance", "stylist", "flights", "profile", "grocery"] as const;
 type ScreenName = (typeof SCREENS)[number];
 
 // A crash must never be a black screen: show the error and offer a retry.
@@ -135,6 +136,10 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [groceryAction, setGroceryAction] = useState<GroceryAction>();
+  useEffect(() => {
+    if (screenName !== "grocery") setGroceryAction(undefined);
+  }, [screenName]);
   const [mealText, setMealText] = useState("");
   const [fontsLoaded] = useFonts({
     InstrumentSerif_400Regular,
@@ -463,6 +468,15 @@ function App() {
 
   const onReaction = useCallback(
     (kind: string, targetId: string, agent?: string) => {
+      if (kind === "action_tapped" && targetId.startsWith("grocery.")) {
+        const [action, id] = targetId.slice("grocery.".length).split(":");
+        if (action === "connect") { setScreenName("profile"); return; }
+        if (["add", "item", "review"].includes(action)) {
+          setGroceryAction({ seq: Date.now(), kind: action, id });
+          setScreenName("grocery");
+          return;
+        }
+      }
       // Client-handled actions (SDUI buttons that trigger flows, not just logs).
       if (kind === "action_tapped" && targetId === "interview.start") {
         setInterviewing(true);
@@ -637,7 +651,7 @@ function App() {
       >
         {error ? (
           <Text style={styles.error}>{error}</Text>
-        ) : screenName === "home" || screenName === "flights" || screenName === "inbox" || screenName === "profile" ? null : screen ? (
+        ) : screenName === "home" || screenName === "flights" || screenName === "inbox" || screenName === "profile" || screenName === "grocery" ? null : screen ? (
           screenName === "hub" ? (
             <HubScreen
               screen={screen}
@@ -676,6 +690,14 @@ function App() {
             onSignOut={signOut}
             onChanged={() => load()}
           />
+        </View>
+      ) : null}
+
+      {screenName === "grocery" && !error ? (
+        <View style={{ position: "absolute", top: 60, left: 0, right: 0, bottom: 0 }}>
+          <GroceryScreen apiUrl={apiUrl} auth={AUTH} action={groceryAction}
+            onConnect={() => setScreenName("profile")}
+            onAskNano={() => setOrbSignal((n) => n + 1)} />
         </View>
       ) : null}
 

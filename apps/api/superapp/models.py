@@ -22,6 +22,17 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class SavedContext(Base):
+    """The user's own words, retained even while the search index is unavailable."""
+    __tablename__ = "saved_context"
+    __table_args__ = (Index("ix_saved_context_user", "user_id", "created_at"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    indexed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class FlightWatch(Base):
     """The Flycatcher: a standing flight-price watch. The scout re-checks it
     daily; the person hears about it only on a new low or a hit target."""
@@ -342,6 +353,11 @@ class GmailAccount(Base):
     # Opaque incremental-sync cursor: a Gmail history id, or a Graph delta
     # link, which is a full URL — hence Text rather than a short string.
     history_id: Mapped[str] = mapped_column(Text, default="")
+    # Committed with the recovered page. NULL means no recovery is in progress.
+    recovery_state: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+    history_import_state: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+    sync_error: Mapped[str] = mapped_column(String(200), default="")
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     watch_expiry: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Push-notification registration id, for providers that name one.
     subscription_id: Mapped[str] = mapped_column(String(128), default="")
@@ -431,8 +447,8 @@ class MailHistory(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     user_id: Mapped[str] = mapped_column(String(64), nullable=False)
     account_email: Mapped[str] = mapped_column(String(128), default="")
-    gmail_msg_id: Mapped[str] = mapped_column(String(32), nullable=False)
-    thread_id: Mapped[str] = mapped_column(String(32), default="")
+    gmail_msg_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    thread_id: Mapped[str] = mapped_column(String(256), default="")
     # 'outbound' is the half the product never had. Without the user's own
     # replies, "unanswered" is a guess and "I always reply to Priya" is unknowable.
     direction: Mapped[str] = mapped_column(String(8), default="inbound")
@@ -479,6 +495,130 @@ class InboxDraft(Base):
     used_imported_context: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class GroceryItem(Base):
+    """One thing on the shelf. The unit the whole vertical is about.
+
+    `declared_out_at` is the person saying "I'm out" with their own eyes on
+    their own cupboard. It outranks every prediction, permanently, until the
+    next purchase — an assistant that argues with someone about whether they
+    have milk is worse than one that never guessed.
+    """
+
+    __tablename__ = "grocery_items"
+    __table_args__ = (
+        UniqueConstraint("user_id", "slug", name="uq_grocery_item"),
+        Index("ix_grocery_user", "user_id", "category"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    slug: Mapped[str] = mapped_column(String(120), nullable=False)   # normalised name
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    category: Mapped[str] = mapped_column(String(40), default="")
+    brand: Mapped[str] = mapped_column(String(80), default="")
+    size: Mapped[str] = mapped_column(String(40), default="")        # "1 gal", "500g"
+    unit: Mapped[str] = mapped_column(String(24), default="")
+    image_ref: Mapped[str] = mapped_column(String(200), default="")
+    # Resolved once against a store's catalogue so a handoff basket contains the
+    # exact product this household buys, not a search engine's guess at the name.
+    product_ref: Mapped[str] = mapped_column(String(64), default="")   # UPC or product id
+    product_ref_kind: Mapped[str] = mapped_column(String(12), default="")  # upc | id
+    on_list: Mapped[bool] = mapped_column(Boolean, default=False)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)     # always keep stocked
+    declared_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_purchased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class GroceryReceipt(Base):
+    """Durable extraction ledger shared by live and historical copies of mail."""
+    __tablename__ = "grocery_receipts"
+    __table_args__ = (UniqueConstraint("user_id", "source_ref", name="uq_grocery_receipt"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_ref: Mapped[str] = mapped_column(String(512), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class GroceryPurchase(Base):
+    """A thing actually bought, once. The only input the forecast trusts.
+
+    `source` says where the knowledge came from — a parsed receipt, a linked
+    platform, or the person typing it — because a shelf built from guesses and
+    a shelf built from receipts deserve different confidence.
+    """
+
+    __tablename__ = "grocery_purchases"
+    __table_args__ = (
+        UniqueConstraint("user_id", "source", "source_ref", "item_id",
+                         name="uq_grocery_purchase"),
+        Index("ix_grocery_purchase_item", "user_id", "item_id", "purchased_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    item_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), default="manual")  # email|platform|manual
+    source_ref: Mapped[str] = mapped_column(String(512), default="")   # receipt/order id
+    merchant: Mapped[str] = mapped_column(String(80), default="")
+    quantity: Mapped[float] = mapped_column(Float, default=1.0)     # packages bought
+    # The size of ONE package, normalised (ml | g | ct). Without it, buying a
+    # half-gallon instead of a gallon looks like the same purchase and the
+    # household appears to slow down.
+    pack_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pack_unit: Mapped[str] = mapped_column(String(8), default="")
+    unit_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    purchased_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class GroceryOrder(Base):
+    """A basket, and how far along it is.
+
+    It exists as a row before anything is bought, for the same reason a reply
+    is a draft before it is sent: spending money is tier 3, so Nano may
+    assemble the basket and may never place it. `confirmed_by` records the
+    person's own yes, and `place_order` refuses without it.
+    """
+
+    __tablename__ = "grocery_orders"
+    __table_args__ = (Index("ix_grocery_order_user", "user_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    platform: Mapped[str] = mapped_column(String(24), default="list")
+    # draft (Nano built it) | confirmed (the person said yes) | placed | failed | cancelled
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    lines: Mapped[list | None] = mapped_column(JSON, default=None)
+    subtotal_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reason: Mapped[str] = mapped_column(String(300), default="")   # why Nano proposed it
+    # A placed order's platform id, or a handed-off basket's URL. Wide enough
+    # to be a URL: truncating one produces a link that loads nothing.
+    external_id: Mapped[str] = mapped_column(String(1024), default="")
+    error: Mapped[str] = mapped_column(String(300), default="")
+    confirmed_by: Mapped[str] = mapped_column(String(8), default="")   # "" | user
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    placed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class GroceryLink(Base):
+    """A shopping platform the person connected."""
+
+    __tablename__ = "grocery_links"
+    __table_args__ = (UniqueConstraint("user_id", "platform", name="uq_grocery_link"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    platform: Mapped[str] = mapped_column(String(24), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="linked")  # linked | revoked
+    account_label: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class User(Base):

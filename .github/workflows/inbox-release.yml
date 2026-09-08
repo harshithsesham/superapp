@@ -1,0 +1,57 @@
+name: Inbox release checks
+on:
+  pull_request:
+  push:
+    branches: [rohitchanges]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: nano
+          POSTGRES_PASSWORD: disposable-test-password
+          POSTGRES_DB: nano_release_check
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U nano -d nano_release_check"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install '.[dev,llm]'
+      - run: python -m pytest -q
+        env:
+          SUPERAPP_ANTHROPIC_API_KEY: ''
+          SUPERAPP_VOYAGE_API_KEY: ''
+      - name: Upgrade main and grocery schemas and verify PostgreSQL retrieval and recovery
+        run: python scripts/check_release_postgres.py
+        env:
+          SUPERAPP_RELEASE_CHECK_DATABASE_URL: postgresql+psycopg2://nano:disposable-test-password@localhost:5432/nano_release_check
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npx tsc --noEmit
+      - run: npx vitest run
