@@ -1,15 +1,15 @@
 """durable conversations: every exchange with Nano, on every surface
 
-Revision ID: 0024
-Revises: 0023
+Revision ID: 0030
+Revises: 0029
 
 Idempotent (create_all races alembic on fresh deploys).
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0024"
-down_revision = "0023"
+revision = "0030"
+down_revision = "0029"
 branch_labels = None
 depends_on = None
 

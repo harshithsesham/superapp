@@ -22,11 +22,11 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .llm.provider import LLMProvider
-from .memory import remember
+from .memory import available, remember
 from .models import Conversation, Person, utcnow
 from .substrate.events import append_event
 from .substrate.facts import write_fact
@@ -313,6 +313,76 @@ def settle(db: Session, convo: Conversation, provider: LLMProvider | None = None
                           "facts": learned["facts"], "people": learned["people"],
                           "skipped": learned.get("skipped", "")})
     return {"settled": True, "chunks": chunks, **learned}
+
+
+def _norm(s: str) -> str:
+    return " ".join((s or "").lower().split())
+
+
+def forget_conversations(db: Session, *, user_id: str, said: str) -> dict:
+    """Take one remembered detail back out of every conversation surface.
+
+    Recording conversations gave the forgotten note three new places to survive
+    that `forget_context` knew nothing about: the raw transcript, the embedded
+    chunk, and any belief distilled from it. A person who is told "forgotten"
+    and finds the detail still in use has been lied to, so forgetting has to
+    reach all three or recording should not exist.
+
+    Scanned in Python rather than matched in SQL on purpose. The turns are JSON,
+    so a LIKE against the serialized column misses any note containing a quote,
+    a newline or a backslash — exactly the escaping cases — and a privacy
+    promise that quietly misses is worse than a slow one. Forgetting is rare and
+    a person's own conversations are few; the rows stream rather than load.
+
+    The unit of forgetting is the CONVERSATION, not the turn. Redacting only
+    matching turns leaks: asked to forget "remember my daughter is called
+    Mira", it takes the person's sentence and leaves Nano's reply — "Noted —
+    Mira." — which never contained the sentence and gives the name away all the
+    same. The same is true of a belief distilled from the exchange, which
+    restates things in its own words. So everything the conversation produced
+    goes: the transcript, its embedding, and its `said.*` beliefs. Losing the
+    unrelated half of one chat is the cheaper mistake by a wide margin.
+
+    One narrow window is not closed: a forget landing while the sweep is mid-
+    settle on a DIFFERENT conversation carrying the same words can let that
+    settle write a chunk or a belief from turns read a moment earlier. It needs
+    a five-minute-idle conversation to be settling at that instant, and the app
+    runs one worker. Serialising the two would mean holding a per-person lock
+    across settle's model call, which would hang "forget that" behind it — a
+    worse trade than the window.
+    """
+    needle = _norm(said)
+    out = {"conversations": 0, "turns": 0, "chunks": 0, "facts": 0}
+    if not needle:
+        return out
+
+    from sqlalchemy import delete as _delete
+
+    from .models import UserFact
+
+    rows = db.scalars(select(Conversation).where(
+        Conversation.user_id == user_id).execution_options(yield_per=200))
+    for convo in rows:
+        turns = list(convo.turns or [])
+        if not any(needle in _norm(t.get("text", "")) for t in turns):
+            continue
+        out["conversations"] += 1
+        out["turns"] += len(turns)
+
+        if available(db):
+            result = db.execute(text(
+                "DELETE FROM memory_chunks WHERE user_id = :u AND kind = 'conversation' "
+                "AND ref_id = :r"), {"u": user_id, "r": f"convo-{convo.id}"})
+            out["chunks"] += result.rowcount or 0
+
+        result = db.execute(_delete(UserFact).where(
+            UserFact.user_id == user_id, UserFact.source_run_id == convo.id,
+            UserFact.key.startswith(FACT_PREFIX)))
+        out["facts"] += result.rowcount or 0
+
+        db.delete(convo)
+    db.flush()
+    return out
 
 
 def settle_idle(db: Session, *, idle_minutes: int = IDLE_MINUTES,

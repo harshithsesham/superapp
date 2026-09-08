@@ -122,6 +122,12 @@ def test_current_main_database_upgrades_without_skipping_groceries(tmp_path):
             c["name"] for c in inspect(engine).get_columns("gmail_accounts")}
         with engine.connect() as db:
             assert db.scalar(text("SELECT history_id FROM gmail_accounts WHERE id='existing-account'")) == "keep-cursor"
-            assert db.scalar(text("SELECT version_num FROM alembic_version")) == "0029"
+            # Derived, not written out: the point is that the upgrade REACHES
+            # head, and a literal pinned here fails on the next migration
+            # someone adds, for no reason connected to what this test covers.
+            revs = _revisions()
+            downs = {down for _, down in revs.values()}
+            head = next(r for r in revs if r not in downs)
+            assert db.scalar(text("SELECT version_num FROM alembic_version")) == head
     finally:
         engine.dispose()

@@ -6,34 +6,25 @@ from being talked to. The orb stored a transcript only when the model chose
 "email my father" — said out loud, never sent — left no trace, and the next
 conversation had never heard of him.
 """
-import os
-import tempfile
+import json
 from datetime import datetime, timedelta, timezone
 
-os.environ["SUPERAPP_DATABASE_URL"] = "sqlite://"  # in-memory, before app import
-os.environ["SUPERAPP_MEDIA_DIR"] = tempfile.mkdtemp(prefix="superapp-convo-")
+from sqlalchemy import select
 
-import json
-
-from sqlalchemy import StaticPool, create_engine, select
-from sqlalchemy.orm import sessionmaker
-
-import superapp.db as db_module
-
-engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
-                       poolclass=StaticPool)
-db_module.engine = engine
-db_module.SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+# One database for the whole suite. This module used to stand up its own engine
+# and repoint `superapp.db`, which worked only while it happened to be imported
+# last: once a sibling module imported test_spine first, the app was bound to
+# one database and test_spine's SessionLocal read another, and 42 tests that
+# have nothing to do with conversations failed. Borrowing the engine is the
+# convention every other module here already follows.
+from test_spine import SessionLocal
 
 from superapp.conversations import (EXTRACT_RETRY_HOURS, FACT_PREFIX, IDLE_MINUTES,
-                                    conversation_key, record_turns, settle,
-                                    settle_idle)
-from superapp.db import Base, SessionLocal
+                                    conversation_key, forget_conversations,
+                                    record_turns, settle, settle_idle)
 from superapp.llm.provider import LLMResponse
 from superapp.models import Conversation, Person, UserFact
 from superapp.substrate import get_context, read_facts
-
-Base.metadata.create_all(bind=engine)
 
 
 class FakeProvider:
@@ -307,4 +298,144 @@ def test_a_conversation_that_always_fails_stops_being_retried():
     db.commit()
     assert settle(db, convo, Exploding())["settled"] is True
     assert convo.settled_at is not None
+    db.close()
+
+
+# --- forgetting reaches every copy ------------------------------------------
+
+def test_forgetting_a_note_takes_the_whole_conversation_with_it():
+    """Recording conversations gave a forgotten note somewhere new to survive.
+
+    Redacting only the matching turn is not enough, and this is the case that
+    proves it: Nano's reply never contains the sentence being forgotten and
+    gives the name away regardless. The conversation is the unit.
+    """
+    db = SessionLocal()
+    convo = record_turns(db, user_id="u-forget", surface="orb", turns=_turns(
+        ("user", "remember that my daughter is called Mira"),
+        ("nano", "Noted — Mira."),          # the leak a per-turn redaction leaves
+        ("user", "also I prefer aisle seats"),
+    ))
+    db.commit()
+
+    removed = forget_conversations(db, user_id="u-forget",
+                                   said="remember that my daughter is called Mira")
+    db.commit()
+
+    assert removed["conversations"] == 1 and removed["turns"] == 3
+    assert db.get(Conversation, convo.id) is None
+    db.close()
+
+
+def test_forgetting_removes_beliefs_distilled_from_that_conversation():
+    """A belief restates things in its own words, so no substring search finds
+    it. Provenance does: the fact carries the conversation it came from."""
+    db = SessionLocal()
+    convo = record_turns(db, user_id="u-forget-fact", surface="orb", turns=_turns(
+        ("user", "please remember that my daughter is called Mira and she is seven"),
+        ("nano", "noted"),
+        ("user", "yes, that is the one thing I want you to hold on to"),
+    ))
+    settle(db, convo, FakeProvider({
+        # Note the wording: nothing here quotes the sentence being forgotten.
+        "facts": [{"key": "daughter", "belief": "Their child is seven years old.",
+                   "confidence": 0.8}],
+        "people": [],
+    }))
+    db.commit()
+    assert db.scalar(select(UserFact).where(
+        UserFact.user_id == "u-forget-fact", UserFact.key == f"{FACT_PREFIX}daughter")) is not None
+
+    removed = forget_conversations(
+        db, user_id="u-forget-fact",
+        said="please remember that my daughter is called Mira and she is seven")
+    db.commit()
+
+    assert removed["facts"] == 1
+    assert db.scalar(select(UserFact).where(
+        UserFact.user_id == "u-forget-fact",
+        UserFact.key == f"{FACT_PREFIX}daughter")) is None
+    db.close()
+
+
+def test_forgetting_reaches_a_conversation_already_settled():
+    """Settled means embedded and distilled — the state in which the detail is
+    most reachable, and so the one that matters most to clear."""
+    db = SessionLocal()
+    convo = record_turns(db, user_id="u-forget-all", surface="telegram",
+                         turns=_turns(("user", "my passport number is 12345")))
+    settle(db, convo)
+    db.commit()
+    assert convo.settled_at is not None
+
+    forget_conversations(db, user_id="u-forget-all", said="my passport number is 12345")
+    db.commit()
+    assert db.get(Conversation, convo.id) is None
+    db.close()
+
+
+def test_forgetting_leaves_other_conversations_alone():
+    db = SessionLocal()
+    keep = record_turns(db, user_id="u-forget-other", surface="orb",
+                        turns=_turns(("user", "something entirely unrelated to it")))
+    db.commit()
+    removed = forget_conversations(db, user_id="u-forget-other", said="a detail never said")
+    db.commit()
+    assert removed["conversations"] == 0
+    assert len(db.get(Conversation, keep.id).turns) == 1
+    db.close()
+
+
+def test_forgetting_matches_past_case_and_spacing():
+    """The saved note and the stored turn are the same words, but a transcript
+    keeps the person's own punctuation and case."""
+    db = SessionLocal()
+    convo = record_turns(db, user_id="u-forget-case", surface="orb",
+                         turns=_turns(("user", "Remember   my   Gate Code Is 4417"),
+                                      ("nano", "ok")))
+    db.commit()
+    removed = forget_conversations(db, user_id="u-forget-case",
+                                   said="remember my gate code is 4417")
+    db.commit()
+    assert removed["conversations"] == 1
+    assert db.get(Conversation, convo.id) is None
+    db.close()
+
+
+def test_one_persons_forget_never_touches_another():
+    db = SessionLocal()
+    mine = record_turns(db, user_id="u-tenant-a", surface="orb",
+                        turns=_turns(("user", "the shared phrase we both said")))
+    theirs = record_turns(db, user_id="u-tenant-b", surface="orb",
+                          turns=_turns(("user", "the shared phrase we both said")))
+    db.commit()
+    forget_conversations(db, user_id="u-tenant-a", said="the shared phrase we both said")
+    db.commit()
+    assert db.get(Conversation, mine.id) is None
+    assert db.get(Conversation, theirs.id) is not None
+    db.close()
+
+
+def test_forget_context_is_the_path_that_reaches_all_of_it():
+    """The unit above proves the reach; this proves it is wired to the thing a
+    person actually says. "Forget that" goes through `forget_context`, and it
+    must clear the transcript as well as the note it was written into."""
+    from superapp.context_notes import forget_context, save_context
+    from superapp.models import SavedContext
+
+    said = "remember that the spare key is under the third pot"
+    db = SessionLocal()
+    note = save_context(db, user_id="u-forget-e2e", text=said)
+    convo = record_turns(db, user_id="u-forget-e2e", surface="orb",
+                         turns=_turns(("user", said), ("nano", "Got it.")))
+    db.commit()
+
+    assert forget_context(db, user_id="u-forget-e2e", note_id=note.id) is True
+    db.commit()
+
+    assert db.get(SavedContext, note.id) is None       # the note itself
+    remaining = db.get(Conversation, convo.id)
+    kept = [t["text"] for t in (remaining.turns if remaining else [])]
+    assert said not in kept, "the transcript copy must go with the note"
+    assert remaining is None, "the exchange that carried it goes whole"
     db.close()

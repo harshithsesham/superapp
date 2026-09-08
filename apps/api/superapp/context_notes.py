@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 
 from . import memory
 from .models import SavedContext, Event
+from .substrate.events import append_event
 
 
 def save_context(db, *, user_id: str, text: str) -> SavedContext:
@@ -74,6 +75,19 @@ def forget_context(db, *, user_id: str, note_id: str) -> bool:
     # command excerpt so it cannot teach the forgotten detail again.
     db.execute(delete(Event).where(Event.user_id == user_id, Event.type == "voice_command",
                Event.payload["heard"].as_string() == note.text[:200]))
+    # Conversations are recorded whole, so the same words also sit in the
+    # transcript, in its embedding, and in any belief distilled from it. This
+    # deletion is what lets recording exist alongside forgetting: without it,
+    # "forget that" removed the note and left three copies standing.
+    from .conversations import forget_conversations
+    removed = forget_conversations(db, user_id=user_id, said=note.text)
+    if removed["conversations"]:
+        # Counts only. Naming what was forgotten in the ledger would put it
+        # straight back into the context the deletion just cleared.
+        append_event(db, user_id=user_id, type="context_forgotten", agent="orb",
+                     payload={"conversations": removed["conversations"],
+                              "turns": removed["turns"], "chunks": removed["chunks"],
+                              "facts": removed["facts"]})
     db.delete(note)
     db.flush()
     return True
