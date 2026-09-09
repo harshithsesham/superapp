@@ -3211,3 +3211,147 @@ def test_voice_finds_the_person_you_named_not_just_recent_ones():
     assert people_matching(db, uid, "can you send that") == []
     assert [p.email for p in people_matching(db, uid, "email Duncan")] == ["duncan@x.com"]
     db.close()
+
+
+def test_push_watch_is_renewed_before_it_lapses():
+    """`subscribe()` was called once, at connect, and `watch_expiry` was written
+    and never read again. Gmail's registration lasts about a week, so push died
+    seven days after connecting and every mailbox fell back to the ten-minute
+    poll — invisible from outside, because mail still arrives, just late."""
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    import superapp.inbox.factory as factory
+    from superapp.dispatcher import WATCH_RENEW_HOURS, renew_watches
+    from superapp.models import GmailAccount, utcnow
+    from superapp.substrate.inbox import upsert_account as _ua
+
+    now = utcnow()
+    fresh_until = now + timedelta(days=7)
+    db = SessionLocal()
+    lapsing = _ua(db, user_id="watch-user", email="lapsing@example.com", provider="stub")
+    lapsing.watch_expiry = now + timedelta(hours=WATCH_RENEW_HOURS - 1)
+    healthy = _ua(db, user_id="watch-user", email="healthy@example.com", provider="stub")
+    healthy.watch_expiry = now + timedelta(days=6)
+    never = _ua(db, user_id="watch-user", email="never@example.com", provider="stub")
+    never.watch_expiry = None            # registration failed at connect
+    db.commit()
+
+    asked: list[str] = []
+
+    def fake_client(db_, user_id, acct):
+        asked.append(acct.email)
+        return SimpleNamespace(subscribe=lambda: (fresh_until, f"sub-{acct.email}"))
+
+    real = factory.client_for
+    factory.client_for = fake_client
+    try:
+        renewed = renew_watches(db, limit=500)
+        db.commit()
+    finally:
+        factory.client_for = real
+
+    assert "healthy@example.com" not in asked, "a watch with days left is left alone"
+    assert {"lapsing@example.com", "never@example.com"} <= set(asked)
+    assert renewed >= 2
+    for row in (lapsing, never):
+        assert row.watch_expiry == fresh_until
+        assert row.subscription_id == f"sub-{row.email}"
+    assert healthy.watch_expiry == now + timedelta(days=6)
+    db.close()
+
+
+def test_a_provider_without_push_is_not_mistaken_for_a_renewal():
+    """Outlook's subscribe is a deliberate no-op and Gmail's returns nothing
+    when no Pub/Sub topic is configured. Neither is a renewal, and neither may
+    stamp an expiry that would then look like working push."""
+    from types import SimpleNamespace
+
+    import superapp.inbox.factory as factory
+    from superapp.dispatcher import renew_watches
+    from superapp.substrate.inbox import upsert_account as _ua
+
+    db = SessionLocal()
+    acct = _ua(db, user_id="watch-nopush", email="nopush@example.com", provider="stub")
+    acct.watch_expiry = None
+    db.commit()
+
+    real = factory.client_for
+    factory.client_for = lambda *a: SimpleNamespace(subscribe=lambda: (None, ""))
+    try:
+        assert renew_watches(db, limit=500) == 0
+        db.commit()
+    finally:
+        factory.client_for = real
+    assert acct.watch_expiry is None
+    db.close()
+
+
+def test_one_unreachable_mailbox_does_not_stop_the_others_renewing():
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    import superapp.inbox.factory as factory
+    from superapp.inbox.base import MailNotConnected
+    from superapp.dispatcher import renew_watches
+    from superapp.models import utcnow
+    from superapp.substrate.inbox import upsert_account as _ua
+
+    later = utcnow() + timedelta(days=7)
+    db = SessionLocal()
+    broken = _ua(db, user_id="watch-mixed", email="broken@example.com", provider="stub")
+    broken.watch_expiry = None
+    ok = _ua(db, user_id="watch-mixed", email="ok@example.com", provider="stub")
+    ok.watch_expiry = None
+    db.commit()
+
+    def flaky(db_, user_id, acct):
+        if acct.email == "broken@example.com":
+            raise MailNotConnected("signed out")
+        return SimpleNamespace(subscribe=lambda: (later, ""))
+
+    real = factory.client_for
+    factory.client_for = flaky
+    try:
+        assert renew_watches(db, limit=500) >= 1
+        db.commit()
+    finally:
+        factory.client_for = real
+    assert broken.watch_expiry is None
+    assert ok.watch_expiry == later
+    db.close()
+
+
+def test_mailboxes_without_push_cannot_starve_one_about_to_lapse():
+    """A provider with no push has a null expiry forever. Ordering nulls first
+    let those occupy every slot on every tick, so the one watch this sweep
+    exists to save — a real one about to lapse — was never reached."""
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    import superapp.inbox.factory as factory
+    from superapp.dispatcher import renew_watches
+    from superapp.models import utcnow
+    from superapp.substrate.inbox import upsert_account as _ua
+
+    now = utcnow()
+    db = SessionLocal()
+    for i in range(6):                      # more no-push mailboxes than the limit
+        acct = _ua(db, user_id="starve", email=f"nopush{i}@example.com", provider="stub")
+        acct.watch_expiry = None
+    lapsing = _ua(db, user_id="starve", email="urgent@example.com", provider="stub")
+    lapsing.watch_expiry = now + timedelta(hours=1)
+    db.commit()
+
+    later = now + timedelta(days=7)
+    real = factory.client_for
+    factory.client_for = lambda db_, uid, acct: SimpleNamespace(
+        subscribe=lambda: ((later, "") if acct.email == "urgent@example.com" else (None, "")))
+    try:
+        renew_watches(db, limit=3)          # fewer slots than no-push mailboxes
+        db.commit()
+    finally:
+        factory.client_for = real
+
+    assert lapsing.watch_expiry == later, "the lapsing watch is reached first"
+    db.close()

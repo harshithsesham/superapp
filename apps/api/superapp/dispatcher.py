@@ -8,15 +8,22 @@ the heartbeat and the Hub timeline see only TERMINAL failures.
 """
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+import httpx
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from .models import AgentTask, Campaign, utcnow
+from .models import AgentTask, Campaign, GmailAccount, utcnow
 from .substrate.events import append_event
 
 MAX_ATTEMPTS = 3          # first run + two retries
 LEASE_MINUTES = 30        # a healthy scout errand finishes in ~2; login windows hold 20
 BACKOFF_MINUTES = (5, 20)  # after 1st and 2nd failure
+
+# Gmail's Pub/Sub registration lasts about seven days. Renew a day early so a
+# missed tick, an outage or a slow deploy cannot leave a gap where mail stops
+# arriving by push.
+WATCH_RENEW_HOURS = 24
+WATCH_RENEW_LIMIT = 20    # mailboxes per tick; the rest come round next time
 
 
 def _step(task: AgentTask, note: str) -> None:
@@ -56,6 +63,62 @@ def retry_or_fail(db: Session, task: AgentTask, error: str) -> str:
                  payload={"task_id": task.id, "attempt": task.attempts,
                           "retry_in_minutes": delay, "error": error[:200]})
     return "queued"
+
+
+def renew_watches(db: Session, *, limit: int = WATCH_RENEW_LIMIT) -> int:
+    """Keep push registrations alive.
+
+    `subscribe()` was called in exactly one place — the moment a mailbox was
+    connected — and `watch_expiry` was written and then never read by anything.
+    Gmail's watch lapses after about seven days, so push quietly died a week
+    after connecting and every mailbox fell back to the ten-minute poll. Nobody
+    would notice from the outside: mail still arrives, just late.
+
+    A NULL expiry is swept too, which is the self-healing half. Registration at
+    connect is best-effort by design ("push registration is a nicety; never
+    block a link"), so a mailbox whose first attempt failed had no push and no
+    second chance. Re-attempting costs nothing where there is nothing to do:
+    Outlook's subscribe is a local no-op, and Gmail's returns without a call
+    when no Pub/Sub topic is configured.
+    """
+    from .inbox.base import MailError
+    from .inbox.factory import client_for
+
+    cutoff = datetime.now(timezone.utc) + timedelta(hours=WATCH_RENEW_HOURS)
+    due = db.scalars(select(GmailAccount).where(
+        or_(GmailAccount.watch_expiry.is_(None), GmailAccount.watch_expiry < cutoff))
+        # Nulls LAST. A provider with no push — Outlook, or Gmail with no
+        # Pub/Sub topic — has a null expiry forever and always will, so putting
+        # nulls first let those mailboxes occupy every slot on every tick and
+        # starve the one thing this sweep exists for: a real watch about to
+        # lapse. Soonest-expiring first, then the never-registered.
+        .order_by(GmailAccount.watch_expiry.asc().nullslast(),
+                  GmailAccount.created_at).limit(limit))
+
+    renewed = 0
+    for acct in due:
+        try:
+            expiry, sub_id = client_for(db, acct.user_id, acct).subscribe()
+        except (MailError, httpx.HTTPError):
+            # A mailbox needing re-auth is the sync's story to tell, not this
+            # sweep's; it already flags and surfaces that. One unreachable
+            # mailbox must not stop the others being renewed.
+            continue
+        except Exception:  # noqa: BLE001
+            continue
+        if expiry is None:
+            continue      # this provider or deployment has no push to renew
+        was = acct.watch_expiry
+        acct.watch_expiry = expiry
+        if sub_id:
+            acct.subscription_id = sub_id
+        append_event(db, user_id=acct.user_id, type="push_watch_renewed",
+                     agent="inbox", domain="inbox",
+                     payload={"account": acct.email, "provider": acct.provider,
+                              "expires_at": expiry.isoformat(),
+                              "first_registration": was is None})
+        renewed += 1
+    return renewed
 
 
 def dispatch_tick(db: Session) -> dict:
@@ -104,8 +167,16 @@ def dispatch_tick(db: Session) -> dict:
     except Exception:  # noqa: BLE001
         conversations_settled = 0
 
+    # Push registrations lapse after about a week. Nothing renewed them, so
+    # every mailbox silently fell back to polling seven days after connecting.
+    try:
+        watches_renewed = renew_watches(db)
+    except Exception:  # noqa: BLE001
+        watches_renewed = 0
+
     return {"reclaimed": reclaimed, "campaigns_queued": campaigns_queued,
-            "auto_sent": auto_sent, "conversations_settled": conversations_settled}
+            "auto_sent": auto_sent, "conversations_settled": conversations_settled,
+            "watches_renewed": watches_renewed}
 
 
 def settle_campaign_check(db: Session, task: AgentTask, result: dict,
