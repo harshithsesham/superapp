@@ -27,3 +27,6 @@ apps/mobile/ios/
 apps/mobile/build/
 apps/mobile/android/
 .env.bak
+
+# Local Claude Code permissions — machine-specific, never shared
+.claude/settings.local.json
