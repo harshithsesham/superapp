@@ -2932,7 +2932,8 @@ def test_every_chunk_is_embedded_not_just_the_first_128():
     batches = []
 
     class _Resp:
-        def __init__(self, n): self._n = n
+        def __init__(self, n):
+            self._n, self.status_code, self.headers = n, 200, {}
         def raise_for_status(self): return None
         def json(self): return {"data": [{"index": i, "embedding": [0.0] * memory.DIMS}
                                          for i in range(self._n)]}
@@ -3355,3 +3356,62 @@ def test_mailboxes_without_push_cannot_starve_one_about_to_lapse():
 
     assert lapsing.watch_expiry == later, "the lapsing watch is reached first"
     db.close()
+
+
+def test_embedding_batches_fit_the_account_not_just_the_biggest_plan():
+    """The binding limit is TOKENS PER MINUTE, and it depends on the plan. A
+    fixed 128-input batch is ~45k tokens, which no rate-limited account can
+    accept — so every request 429'd, retry_pending swallowed it, and a 1,820
+    row backlog sat undrained while recall reported itself degraded."""
+    import superapp.memory as memory
+
+    long_chunk = "x" * 1400            # ~350 tokens, a realistic chunk
+    batches = memory._batches([long_chunk] * 50)
+    assert len(batches) > 1, "50 realistic chunks must not go in one request"
+    for b in batches:
+        assert len(b) <= memory.EMBED_MAX_INPUTS
+        est = sum(max(1, len(t) // 4) for t in b)
+        assert est <= memory.EMBED_TOKEN_BUDGET or len(b) == 1, est
+    assert sum(len(b) for b in batches) == 50, "no chunk may be dropped"
+
+    # one oversized text still goes, alone, rather than vanishing
+    huge = "y" * (memory.EMBED_TOKEN_BUDGET * 8)
+    assert [len(b) for b in memory._batches([huge])] == [1]
+
+
+def test_rate_limiting_is_waited_out_not_reported_as_success():
+    """A 429 is 'try again', not 'there was nothing to do'. Reporting zero
+    silently is what hid the stuck backlog for weeks."""
+    import superapp.config as config_module
+    import superapp.memory as memory
+
+    settings = config_module.get_settings()
+    prev = settings.voyage_api_key
+    settings.voyage_api_key = "test-key"
+    calls = []
+
+    class _Resp:
+        def __init__(self, code, n=0):
+            self.status_code, self._n, self.headers = code, n, {"retry-after": "0"}
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise __import__("httpx").HTTPStatusError("boom", request=None, response=None)
+        def json(self):
+            return {"data": [{"index": i, "embedding": [0.0] * memory.DIMS}
+                             for i in range(self._n)]}
+
+    def flaky(url, **kw):
+        n = len(kw["json"]["input"])
+        calls.append(n)
+        return _Resp(429) if len(calls) == 1 else _Resp(200, n)
+
+    orig_post, orig_sleep = memory.httpx.post, memory.time.sleep
+    memory.httpx.post = flaky
+    memory.time.sleep = lambda *_: None
+    try:
+        vecs, status = memory.embed(["a chunk", "another chunk"])
+        assert status == "ok" and len(vecs) == 2
+        assert len(calls) == 2, "the rate-limited request must be retried, not abandoned"
+    finally:
+        memory.httpx.post, memory.time.sleep = orig_post, orig_sleep
+        settings.voyage_api_key = prev

@@ -236,14 +236,15 @@ def test_embedding_batches_preserve_the_tail_and_reject_missing_vectors(monkeypa
     def post(url, **kw):
         batch = kw["json"]["input"]
         batches.append(len(batch))
-        return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"data": [
+        return SimpleNamespace(status_code=200, headers={}, raise_for_status=lambda: None,
+                               json=lambda: {"data": [
             {"index": i, "embedding": [float(t)] * memory.DIMS} for i, t in reversed(list(enumerate(batch)))]})
     monkeypatch.setattr(memory.httpx, "post", post)
     vecs, status = memory.embed([str(i) for i in range(150)])
     assert batches == [128, 22] and status == "ok"
     assert len(vecs) == 150 and vecs[-1][0] == 149
     monkeypatch.setattr(memory.httpx, "post", lambda *a, **k: SimpleNamespace(
-        raise_for_status=lambda: None, json=lambda: {"data": []}))
+        status_code=200, headers={}, raise_for_status=lambda: None, json=lambda: {"data": []}))
     with pytest.raises(memory.EmbeddingUnavailable): memory.embed(["lost"])
 
 

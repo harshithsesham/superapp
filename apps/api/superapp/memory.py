@@ -12,7 +12,9 @@ or a provider failure leave text pending for retry and available to lexical
 search. Legacy stub vectors are excluded from semantic search and retried.
 """
 import json
+import logging
 import math
+import time
 import re
 import uuid
 from datetime import datetime
@@ -22,6 +24,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .config import get_settings
+
+LOG = logging.getLogger(__name__)
 
 DIMS = 1024
 CHUNK_CHARS = 1400        # ~350 tokens: one idea, small enough to rank precisely
@@ -33,6 +37,35 @@ class EmbeddingUnavailable(RuntimeError):
     """The embedding provider was configured but did not answer."""
 
 
+# The provider caps inputs per request, but the binding constraint is TOKENS
+# PER MINUTE, and that ceiling depends on the account's plan. An account with
+# no payment method is held to 10k tokens a minute, where a single 128-chunk
+# request is roughly 45k — so every request failed, the retry swallowed it,
+# and the backlog never drained. Size batches by an estimated token budget,
+# not by a count that only suits the largest plan.
+EMBED_MAX_INPUTS = 128          # provider's hard ceiling on inputs per request
+EMBED_TOKEN_BUDGET = 2500       # per request; safe under a 10k/minute floor
+_EMBED_RETRIES = 4
+
+
+def _batches(texts: list[str]) -> list[list[str]]:
+    """Split so no request exceeds the input cap or the token budget. A single
+    text over budget still goes alone rather than being dropped."""
+    out: list[list[str]] = []
+    cur: list[str] = []
+    tokens = 0
+    for t in texts:
+        est = max(1, len(t) // 4)          # ~4 characters per token
+        if cur and (len(cur) >= EMBED_MAX_INPUTS or tokens + est > EMBED_TOKEN_BUDGET):
+            out.append(cur)
+            cur, tokens = [], 0
+        cur.append(t)
+        tokens += est
+    if cur:
+        out.append(cur)
+    return out
+
+
 def embed(texts: list[str], *, input_type: str = "document") -> tuple[list[list[float]], str]:
     """All batches or an explicit failure; never return fabricated vectors."""
     if not texts:
@@ -40,27 +73,43 @@ def embed(texts: list[str], *, input_type: str = "document") -> tuple[list[list[
     settings = get_settings()
     if not settings.voyage_api_key:
         raise EmbeddingUnavailable("No embedding provider configured")
-    try:
-        vectors = []
-        for offset in range(0, len(texts), 128):
-            batch = texts[offset:offset + 128]
-            resp = httpx.post(
-                "https://api.voyageai.com/v1/embeddings",
-                headers={"Authorization": f"Bearer {settings.voyage_api_key}"},
-                json={"model": "voyage-3.5-lite", "input": batch,
-                      "input_type": input_type, "output_dimension": DIMS}, timeout=30)
-            resp.raise_for_status()
-            rows = sorted(resp.json()["data"], key=lambda d: d["index"])
-            if [d["index"] for d in rows] != list(range(len(batch))):
-                raise ValueError("Incomplete embedding batch")
-            for row in rows:
-                vec = row["embedding"]
-                if len(vec) != DIMS or not all(math.isfinite(x) for x in vec):
-                    raise ValueError("Invalid embedding vector")
-                vectors.append(vec)
-        return vectors, "ok"
-    except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
-        raise EmbeddingUnavailable("Embedding request failed or returned incomplete data") from e
+    vectors: list[list[float]] = []
+    for batch in _batches(texts):
+        for attempt in range(_EMBED_RETRIES):
+            try:
+                resp = httpx.post(
+                    "https://api.voyageai.com/v1/embeddings",
+                    headers={"Authorization": f"Bearer {settings.voyage_api_key}"},
+                    json={"model": "voyage-3.5-lite", "input": batch,
+                          "input_type": input_type, "output_dimension": DIMS}, timeout=60)
+                if resp.status_code == 429:
+                    # Rate limited, not broken. Wait out the window and try
+                    # again; giving up here is what left the backlog stuck.
+                    if attempt == _EMBED_RETRIES - 1:
+                        raise EmbeddingUnavailable(
+                            "Embedding provider is rate limiting; try again later")
+                    wait = float(resp.headers.get("retry-after") or 0) or 21 * (attempt + 1)
+                    time.sleep(min(wait, 90))
+                    continue
+                resp.raise_for_status()
+                rows = sorted(resp.json()["data"], key=lambda d: d["index"])
+                if [d["index"] for d in rows] != list(range(len(batch))):
+                    raise ValueError("Incomplete embedding batch")
+                for row in rows:
+                    vec = row["embedding"]
+                    if len(vec) != DIMS or not all(math.isfinite(x) for x in vec):
+                        raise ValueError("Invalid embedding vector")
+                    vectors.append(vec)
+                break
+            except EmbeddingUnavailable:
+                raise
+            except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
+                raise EmbeddingUnavailable(
+                    "Embedding request failed or returned incomplete data") from e
+    if len(vectors) != len(texts):
+        raise EmbeddingUnavailable(
+            f"Embedded {len(vectors)} of {len(texts)} chunks")
+    return vectors, "ok"
 
 
 def available(db: Session) -> bool:
@@ -186,7 +235,10 @@ def retry_pending(db: Session, *, user_id: str | None = None, limit: int = 200) 
         return 0
     try:
         vecs, status = embed([r["content"] for r in rows])
-    except EmbeddingUnavailable:
+    except EmbeddingUnavailable as e:
+        # Returning a silent 0 is how a stuck backlog stays invisible: the
+        # nightly pass reported success while re-embedding nothing for weeks.
+        LOG.warning("retry_pending embedded nothing: %s", e)
         return 0
     for row, vec in zip(rows, vecs):
         db.execute(text("UPDATE memory_chunks SET embedding = (:e)::vector, embed_status = :st "
